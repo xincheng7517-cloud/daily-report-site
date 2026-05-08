@@ -1,9 +1,11 @@
 const { Pool } = require('pg');
 
-const connectionString = process.env.DATABASE_URL;
+// Railway PostgreSQL 注入 DATABASE_PUBLIC_URL；也支持 DATABASE_URL
+const connectionString = process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL;
 
 if (!connectionString) {
-  console.error('❌ 未设置 DATABASE_URL 环境变量');
+  console.error('❌ 未设置 DATABASE_PUBLIC_URL 或 DATABASE_URL 环境变量');
+  console.error('   可用变量:', Object.keys(process.env).filter(k => k.includes('DATABASE')).join(', ') || '无');
   process.exit(1);
 }
 
@@ -16,6 +18,7 @@ if (connectionString.includes('proxy.rlwy') && !connectionString.includes('sslmo
 
 console.log('[DB] 连接方式:', connectionString.includes('proxy.rlwy') ? '公网代理' : '内部网络');
 console.log('[DB] 主机:', connectionString.match(/@([^/?]+)/)?.[1] || '未知');
+console.log('[DB] SSL 模式:', connectionString.includes('sslmode') ? '已设置' : '未设置');
 
 const pool = new Pool({
   connectionString: finalConnectionString,
