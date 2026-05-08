@@ -1,28 +1,47 @@
 const { Pool } = require('pg');
 
-// Railway PostgreSQL 注入 DATABASE_PUBLIC_URL；也支持 DATABASE_URL
-const connectionString = process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL;
+// Railway PostgreSQL 连接
+// Railway 自动注入多个 DATABASE 相关变量：
+// - DATABASE_URL: 主 URL（可能是内部或公网）
+// - DATABASE_PUBLIC_URL: 公网代理 URL
+// - DATABASE_HOST, DATABASE_PORT, DATABASE_USER, DATABASE_PASSWORD, DATABASE_DATABASE: 内部网络参数
+const publicUrl = process.env.DATABASE_PUBLIC_URL;
+const internalHost = process.env.DATABASE_HOST;
+const internalPort = process.env.DATABASE_PORT;
+const internalUser = process.env.DATABASE_USER;
+const internalPassword = process.env.DATABASE_PASSWORD;
+const internalDb = process.env.DATABASE_DATABASE;
+
+// 优先使用内部网络参数（不需要 SSL）
+const useInternal = internalHost && internalPort && internalUser && internalPassword && internalDb;
+let connectionString;
+let useSSL = false;
+
+if (useInternal) {
+  connectionString = `postgresql://${internalUser}:${internalPassword}@${internalHost}:${internalPort}/${internalDb}`;
+  console.log('[DB] 使用内部网络连接');
+} else if (publicUrl) {
+  connectionString = publicUrl;
+  useSSL = true;
+  console.log('[DB] 使用公网代理连接');
+} else {
+  connectionString = process.env.DATABASE_URL;
+  useSSL = connectionString && connectionString.includes('proxy.rlwy');
+  console.log('[DB] 使用 DATABASE_URL');
+}
 
 if (!connectionString) {
-  console.error('❌ 未设置 DATABASE_PUBLIC_URL 或 DATABASE_URL 环境变量');
-  console.error('   可用变量:', Object.keys(process.env).filter(k => k.includes('DATABASE')).join(', ') || '无');
+  console.error('❌ 未找到数据库连接信息');
+  console.error('   DATABASE_HOST:', internalHost || '无');
+  console.error('   DATABASE_PUBLIC_URL:', publicUrl ? '有' : '无');
   process.exit(1);
 }
 
-// Railway 公网代理需要显式添加 sslmode=no-verify
-let finalConnectionString = connectionString;
-const useSSL = connectionString.includes('proxy.rlwy');
-if (useSSL) {
-  finalConnectionString = connectionString + (connectionString.includes('?') ? '&' : '?') + 'sslmode=no-verify';
-  console.log('[DB] 已添加 sslmode=no-verify 到连接字符串');
-}
-
-console.log('[DB] 连接方式:', useSSL ? '公网代理' : '内部网络');
-console.log('[DB] 主机:', connectionString.match(/@([^/?]+)/)?.[1] || '未知');
-console.log('[DB] SSL 模式:', useSSL ? '启用' : '禁用');
+console.log('[DB] 主机:', connectionString.match(/@([^/?:]+)/)?.[1] || '未知');
+console.log('[DB] SSL:', useSSL ? '启用' : '禁用');
 
 const pool = new Pool({
-  connectionString: finalConnectionString,
+  connectionString,
   ssl: useSSL ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 10000,
   query_timeout: 10000,
