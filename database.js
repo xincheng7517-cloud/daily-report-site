@@ -1,27 +1,28 @@
 const { Pool } = require('pg');
 
-// 只用公网代理连接（内部DNS在Railway有IPv6问题）
-const connectionString = process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL;
+// Railway 内部连接优先（同项目服务自动网络互通）
+// 如果未设置 DATABASE_URL，则尝试公网代理
+const connectionString = process.env.DATABASE_URL || process.env.DATABASE_PUBLIC_URL;
 
 if (!connectionString) {
-  console.error('❌ 未设置 DATABASE_PUBLIC_URL 或 DATABASE_URL 环境变量');
-  console.error('   请在 Railway 中设置 DATABASE_PUBLIC_URL');
+  console.error('❌ 未设置 DATABASE_URL 或 DATABASE_PUBLIC_URL 环境变量');
   process.exit(1);
 }
 
-// 确保连接字符串包含 sslmode=require
+const isPublicProxy = connectionString.includes('proxy.rlwy');
+
+// 公网代理需要 SSL，内部连接不需要
 let finalConnectionString = connectionString;
-if (!finalConnectionString.includes('sslmode=')) {
+if (isPublicProxy && !finalConnectionString.includes('sslmode=')) {
   finalConnectionString += finalConnectionString.includes('?') ? '&sslmode=require' : '?sslmode=require';
 }
 
-console.log('[DB] 连接方式: 公网代理 (SSL)');
-console.log('[DB] 主机:', finalConnectionString.match(/@([^/]+)/)?.[1] || '未知');
-console.log('[DB] SSL启用: true (rejectUnauthorized=false)');
+console.log('[DB] 连接方式:', isPublicProxy ? '公网代理 (SSL)' : '内部网络 (无SSL)');
+console.log('[DB] 主机:', finalConnectionString.match(/@([^/?]+)/)?.[1] || '未知');
 
 const pool = new Pool({
   connectionString: finalConnectionString,
-  ssl: { rejectUnauthorized: false },
+  ssl: isPublicProxy ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 10000,
   query_timeout: 10000,
 });
