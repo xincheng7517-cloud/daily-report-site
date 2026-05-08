@@ -39,6 +39,11 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// 健康检查端点（Railway 部署必需）
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // ========== API 接口 ==========
 
 // 登录
