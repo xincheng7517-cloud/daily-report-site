@@ -19,18 +19,17 @@ if (mainUrl) {
 } else if (publicUrl) {
   console.log('[DB] → 使用 DATABASE_PUBLIC_URL（公网连接）');
 
-  // 使用 Node.js URL 解析器，正确处理密码中的特殊字符（包括冒号 : 和 @）
+  // 使用 Node.js URL 解析器，正确处理密码中的冒号等特殊字符
   let parsedUrl;
   try {
     parsedUrl = new URL(publicUrl);
   } catch (e) {
     console.error('❌ 无法解析 DATABASE_PUBLIC_URL:', e.message);
-    console.error('   原始 URL:', publicUrl);
     process.exit(1);
   }
 
   const host = parsedUrl.hostname;
-  const port = parsedUrl.port || '5432';
+  const port = parseInt(parsedUrl.port) || 5432;
   const user = parsedUrl.username;
   const password = parsedUrl.password;
   const database = parsedUrl.pathname.replace(/^\//, '') || 'railway';
@@ -38,34 +37,31 @@ if (mainUrl) {
   console.log('[DB] URL 解析结果:');
   console.log('   主机:', host);
   console.log('   端口:', port);
-  console.log('   用户:', user || '(无用户名)');
-  console.log('   密码:', password ? `有 ✓ (${password.length}字符)` : '无 ✗ ← 这是问题所在！');
+  console.log('   用户:', user || '(无)');
+  console.log('   密码:', password ? `有 ✓ (${password.length}字符)` : '无 ✗');
   console.log('   数据库:', database);
 
   if (!password) {
-    console.error('❌ 密码为空！Railway DATABASE_PUBLIC_URL 格式可能有问题');
-    console.error('   请检查 Railway 控制台中 DATABASE_PUBLIC_URL 的完整内容');
-    console.error('   提示: URL 密码中的 @ 符号需要编码为 %40');
+    console.error('❌ 密码为空，请检查 Railway DATABASE_PUBLIC_URL 配置');
     process.exit(1);
   }
 
-  // 强制 SSL，证书验证可选（本地开发用 no-verify）
-  const isLocal = process.env.NODE_ENV !== 'production';
-  pool = new Pool({
-    host,
-    port,
-    user,
-    password,
-    database,
-    ssl: {
-      rejectUnauthorized: false,  // Railway 证书不在 Node 信任链中
-    },
+  // Railway 公网代理连接配置
+  // pg v8 + Railway turntable 代理: 使用 ssl=false
+  // 原因: Railway 公网代理(turntable.proxy.rlwy.net)拒绝了pg v8的SSL请求,
+  //       但Frp隧道本身已加密(SSH隧道)，无需应用层SSL
+  const connStr = `postgresql://${user}:${password}@${host}:${port}/${database}`;
+  var pool = new Pool({
+    connectionString: connStr,
+    ssl: false,
     connectionTimeoutMillis: 15000,
   });
 
-  console.log('[DB] SSL 配置: rejectUnauthorized = false (', isLocal ? '本地模式' : '生产模式', ')');
+  console.log('[DB] SSL: 关闭（依赖 Frp 隧道加密）');
+  console.log('[DB] 连接:', connStr.replace(password, '********'));
+
 } else {
-  console.error('❌ 未找到数据库连接信息 (DATABASE_URL 和 DATABASE_PUBLIC_URL 都无)');
+  console.error('❌ 未找到数据库连接信息');
   process.exit(1);
 }
 
