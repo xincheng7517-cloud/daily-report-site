@@ -39,9 +39,9 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// 健康检查端点（Railway 部署必需）
+// 健康检查端点（Railway 必需）
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok' });
 });
 
 // ========== API 接口 ==========
@@ -197,9 +197,6 @@ app.put('/api/members/:id/toggle', requireAdmin, async (req, res) => {
   await pool.query('UPDATE users SET active = $1 WHERE id = $2', [newActive, id]);
   res.json({ success: true, active: newActive });
 });
-
-// 健康检查（Railway 需要）
-app.get('/health', (req, res) => res.json({ ok: true }));
 
 // 免登录汇总查询（供自动化任务调用，需要 serviceKey）
 const SERVICE_KEY = process.env.SERVICE_KEY || 'daily-report-secret-key';
