@@ -9,11 +9,12 @@ if (!connectionString) {
   process.exit(1);
 }
 
-// Railway 公网代理需要显式添加 sslmode=require
+// Railway 公网代理需要显式添加 sslmode
+// pg v8+ 把 sslmode=require 当作 verify-full（需要证书），改用 no-verify 跳过验证
 let finalConnectionString = connectionString;
 if (connectionString.includes('proxy.rlwy') && !connectionString.includes('sslmode')) {
-  finalConnectionString = connectionString + (connectionString.includes('?') ? '&' : '?') + 'sslmode=require';
-  console.log('[DB] 已添加 sslmode=require 到连接字符串');
+  finalConnectionString = connectionString + (connectionString.includes('?') ? '&' : '?') + 'sslmode=no-verify';
+  console.log('[DB] 已添加 sslmode=no-verify 到连接字符串');
 }
 
 console.log('[DB] 连接方式:', connectionString.includes('proxy.rlwy') ? '公网代理' : '内部网络');
