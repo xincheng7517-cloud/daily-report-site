@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>明日计划汇总 - 团队日报系统</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <h2>📊 明日计划汇总</h2>
+  <div>
+    <button class="btn btn-default btn-sm" onclick="goDashboard()">返回提交</button>
+    <button class="btn btn-danger btn-sm" onclick="doLogout()">退出</button>
+  </div>
+</nav>
+
+<div class="container" style="align-items:flex-start;padding-top:20px;">
+  <div class="card wide-card">
+
+    <div class="top-bar">
+      <h2 id="pageTitle">明日计划汇总</h2>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="date" class="date-picker" id="datePicker" onchange="loadSummary()" />
+        <button class="btn btn-success btn-sm" id="exportBtn" onclick="exportCSV()" style="display:none;">导出Excel</button>
+      </div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:50px;">#</th>
+            <th>姓名</th>
+            <th style="width:90px;">状态</th>
+            <th>工作里程</th>
+            <th>工作内容摘要</th>
+            <th style="width:160px;">提交时间</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- 成员管理区（仅管理员可见） -->
+    <div id="adminPanel" style="display:none;margin-top:28px;padding-top:20px;border-top:2px solid #e8e8e8;">
+      <h3 style="margin-bottom:12px;">👤 成员管理</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+        <input type="text" id="newName" placeholder="新成员姓名" style="flex:1;min-width:120px;" />
+        <input type="text" id="newPassword" placeholder="密码（默认000000）" value="000000" style="flex:1;min-width:140px;" />
+        <button class="btn btn-success btn-sm" onclick="addMember()">添加成员</button>
+      </div>
+      <p id="adminMsg" class="success" style="font-size:13px;"></p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>姓名</th>
+              <th style="width:80px;">状态</th>
+              <th style="width:100px;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="memberTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <p id="loadMsg" style="text-align:center;color:#999;margin-top:16px;">加载中...</p>
+  </div>
+</div>
+
+<script src="js/admin.js"></script>
+</body>
+</html>

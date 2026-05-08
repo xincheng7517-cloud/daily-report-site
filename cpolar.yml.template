@@ -1,0 +1,14 @@
+# cpolar 配置文件模板
+# 使用方法：
+#   1. 将本文件复制为 C:\Users\你的用户名\.cpolar\cpolar.yml
+#   2. 替换下面的 <你的token> 和 <你的子域名>
+#   3. 运行：cpolar start daily-report
+
+authtoken: <你的token，在 cpolar 控制台"验证"页面获取>
+
+tunnels:
+  daily-report:
+    addr: 3000          # 本地服务端口
+    proto: http          # 协议类型
+    subdomain: <你保留的子域名，在 cpolar 控制台"预留"页面设置>
+    # region: cn          # 可选，指定国内节点
