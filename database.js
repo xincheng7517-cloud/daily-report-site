@@ -1,27 +1,82 @@
 const { Pool } = require('pg');
+const fs = require('fs');
+const tls = require('tls');
 
-// Railway 内部连接（同一项目，无需 SSL）
-const mainUrl = process.env.DATABASE_URL;
+// Railway 连接
+const mainUrl = process.env.DATABASE_URL;       // 内部网络（ Railway 部署时）
+const publicUrl = process.env.DATABASE_PUBLIC_URL; // 公网连接（本地开发时）
 
-if (!mainUrl) {
-  console.error('❌ 未找到 DATABASE_URL，请确认 PostgreSQL 在同一 Railway 项目中');
+console.log('[DB] 检测环境变量:');
+console.log('   DATABASE_URL:', mainUrl ? '有 ✓' : '无 ✗');
+console.log('   DATABASE_PUBLIC_URL:', publicUrl ? '有 ✓' : '无 ✗');
+
+let pool;
+
+if (mainUrl) {
+  // ===== Railway 内部网络，无需 SSL =====
+  console.log('[DB] → 使用 DATABASE_URL（Railway 内部网络）');
+  pool = new Pool({
+    connectionString: mainUrl,
+    ssl: false,
+    connectionTimeoutMillis: 15000,
+  });
+
+} else if (publicUrl) {
+  // ===== 公网连接，必须走 SSL =====
+  console.log('[DB] → 使用 DATABASE_PUBLIC_URL（公网连接）');
+
+  const parsed = new URL(publicUrl);
+  const host = parsed.hostname;
+  const port = parseInt(parsed.port) || 5432;
+  const user = parsed.username;
+  const password = parsed.password;
+  const database = parsed.pathname.replace(/^\//, '') || 'railway';
+
+  console.log('   主机:', host, '端口:', port, '数据库:', database);
+
+  if (!password) {
+    console.error('❌ 密码为空，请检查 DATABASE_PUBLIC_URL');
+    process.exit(1);
+  }
+
+  // pg v8 的 sslmode=require 会做 hostname 验证
+  // 改用 connectionString + ssl: true + rejectUnauthorized 仍会验证主机名
+  // 用自定义 tls.connect 绕过 hostname 验证
+  const connectionString = `postgresql://${user}:${password}@${host}:${port}/${database}`;
+
+  // Railway 公网代理使用 SSL，pg v8 + Node.js tls 会验证主机名
+  // Railway 证书 CN 是 *.railway.dev，与 turntable.proxy.rlwy.net 不匹配
+  // 用 checkServerIdentity 强制跳过主机名验证
+  let sslConfig;
+  try {
+    const caCert = fs.readFileSync('/etc/ssl/certs/ca-certificates.crt');
+    sslConfig = { ca: caCert, rejectUnauthorized: false, checkServerIdentity: () => undefined };
+    console.log('[DB] SSL: 系统 CA + 跳过主机名验证');
+  } catch (e) {
+    sslConfig = { rejectUnauthorized: false, checkServerIdentity: () => undefined };
+    console.log('[DB] SSL: rejectUnauthorized=false + 跳过主机名验证');
+  }
+
+  pool = new Pool({
+    connectionString,
+    ssl: sslConfig,
+    connectionTimeoutMillis: 15000,
+  });
+
+} else {
+  console.error('❌ 未找到数据库连接信息（DATABASE_URL 和 DATABASE_PUBLIC_URL 都缺失）');
   process.exit(1);
 }
-
-// 使用 Railway 内部网络，绕过公网代理，无 SSL 问题
-var pool = new Pool({
-  connectionString: mainUrl,
-  ssl: false,
-  connectionTimeoutMillis: 15000,
-});
-console.log('[DB] 使用 DATABASE_URL（Railway 内部网络，无 SSL）');
-console.log('[DB] 连接字符串已隐藏保护');
 
 // 立即测试连接
 pool.connect((err, client, release) => {
   if (err) {
     console.error('❌ 数据库连接失败:', err.message);
     console.error('   错误代码:', err.code);
+    if (err.code === 'ENOTFOUND') console.error('   → 主机名解析失败，检查网络');
+    if (err.message.includes('Connection terminated')) {
+      console.error('   → 连接被重置，Railway 公网代理要求 SSL，请确认 ssl 配置正确');
+    }
   } else {
     console.log('✅ 数据库连接成功！');
     release();
@@ -34,7 +89,6 @@ async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
     let client;
     try {
       client = await pool.connect();
-      const fs = require('fs');
 
       let existingUsers = [];
       try { existingUsers = JSON.parse(fs.readFileSync('./users.json', 'utf8')); } catch (e) {}
@@ -70,7 +124,8 @@ async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
           await client.query(
             `INSERT INTO users (id, name, password, active, is_admin, created_at)
              VALUES ($1,$2,$3,$4,$5,${ts ? 'to_timestamp($6)' : 'NOW()'})`,
-            ts ? [u.id, u.name, u.password, u.active || 1, !!u.isAdmin, ts] : [u.id, u.name, u.password, u.active || 1, !!u.isAdmin]
+            ts ? [u.id, u.name, u.password, u.active || 1, !!u.isAdmin, ts]
+                : [u.id, u.name, u.password, u.active || 1, !!u.isAdmin]
           );
         }
       }
