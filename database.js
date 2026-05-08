@@ -7,14 +7,19 @@ if (!connectionString) {
   process.exit(1);
 }
 
+// Railway 公网代理需要显式添加 sslmode=require
+let finalConnectionString = connectionString;
+if (connectionString.includes('proxy.rlwy') && !connectionString.includes('sslmode')) {
+  finalConnectionString = connectionString + (connectionString.includes('?') ? '&' : '?') + 'sslmode=require';
+  console.log('[DB] 已添加 sslmode=require 到连接字符串');
+}
+
 console.log('[DB] 连接方式:', connectionString.includes('proxy.rlwy') ? '公网代理' : '内部网络');
 console.log('[DB] 主机:', connectionString.match(/@([^/?]+)/)?.[1] || '未知');
 
 const pool = new Pool({
-  connectionString,
-  ssl: connectionString.includes('proxy.rlwy')
-    ? { rejectUnauthorized: false, sslmode: 'require' }
-    : false,
+  connectionString: finalConnectionString,
+  ssl: false,
   connectionTimeoutMillis: 10000,
   query_timeout: 10000,
 });
