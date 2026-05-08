@@ -1,44 +1,49 @@
 const { Pool } = require('pg');
 
 // Railway PostgreSQL 连接
-// Railway 自动注入多个 DATABASE 相关变量：
-// - DATABASE_URL: 主 URL（可能是内部或公网）
-// - DATABASE_PUBLIC_URL: 公网代理 URL
-// - DATABASE_HOST, DATABASE_PORT, DATABASE_USER, DATABASE_PASSWORD, DATABASE_DATABASE: 内部网络参数
 const publicUrl = process.env.DATABASE_PUBLIC_URL;
+const mainUrl = process.env.DATABASE_URL;
 const internalHost = process.env.DATABASE_HOST;
 const internalPort = process.env.DATABASE_PORT;
 const internalUser = process.env.DATABASE_USER;
 const internalPassword = process.env.DATABASE_PASSWORD;
 const internalDb = process.env.DATABASE_DATABASE;
 
-// 优先使用内部网络参数（不需要 SSL）
+console.log('[DB] 可用变量:');
+console.log('   DATABASE_URL:', mainUrl ? `有 (${mainUrl.substring(0, 50)}...)` : '无');
+console.log('   DATABASE_PUBLIC_URL:', publicUrl ? '有' : '无');
+console.log('   DATABASE_HOST:', internalHost || '无');
+console.log('   DATABASE_PORT:', internalPort || '无');
+console.log('   DATABASE_USER:', internalUser || '无');
+console.log('   DATABASE_PASSWORD:', internalPassword ? '有' : '无');
+console.log('   DATABASE_DATABASE:', internalDb || '无');
+
+// 优先使用内部网络参数（Railway 内部通信不需要 SSL）
 const useInternal = internalHost && internalPort && internalUser && internalPassword && internalDb;
 let connectionString;
 let useSSL = false;
 
 if (useInternal) {
   connectionString = `postgresql://${internalUser}:${internalPassword}@${internalHost}:${internalPort}/${internalDb}`;
+  useSSL = false;
   console.log('[DB] 使用内部网络连接');
 } else if (publicUrl) {
-  connectionString = publicUrl;
-  useSSL = true;
-  console.log('[DB] 使用公网代理连接');
-} else {
-  connectionString = process.env.DATABASE_URL;
-  useSSL = connectionString && connectionString.includes('proxy.rlwy');
+  // Railway 公网代理：尝试 uselibpqcompat 模式
+  const separator = publicUrl.includes('?') ? '&' : '?';
+  connectionString = publicUrl + separator + 'uselibpqcompat=true&sslmode=require';
+  useSSL = false; // uselibpqcompat 下 sslmode 在连接字符串中处理
+  console.log('[DB] 使用公网代理连接 (uselibpqcompat 模式)');
+} else if (mainUrl) {
+  connectionString = mainUrl;
+  useSSL = mainUrl.includes('proxy.rlwy');
   console.log('[DB] 使用 DATABASE_URL');
-}
-
-if (!connectionString) {
+} else {
   console.error('❌ 未找到数据库连接信息');
-  console.error('   DATABASE_HOST:', internalHost || '无');
-  console.error('   DATABASE_PUBLIC_URL:', publicUrl ? '有' : '无');
   process.exit(1);
 }
 
 console.log('[DB] 主机:', connectionString.match(/@([^/?:]+)/)?.[1] || '未知');
-console.log('[DB] SSL:', useSSL ? '启用' : '禁用');
+console.log('[DB] 连接字符串:', connectionString);
 
 const pool = new Pool({
   connectionString,
