@@ -3,10 +3,7 @@
   "build": {
     "nixpacksPlan": {
       "apt_packages": ["libatomic1"],
-      "install": ["node"],
-      "env": {
-        "NIXPACKS_NO_DB_URL": "1"
-      }
+      "install": ["node"]
     }
   },
   "deploy": {

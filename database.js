@@ -1,61 +1,21 @@
 const { Pool } = require('pg');
 
-// Railway 数据库连接
-const publicUrl = process.env.DATABASE_PUBLIC_URL;
+// Railway 内部连接（同一项目，无需 SSL）
 const mainUrl = process.env.DATABASE_URL;
 
-console.log('[DB] 检测到的环境变量:');
-console.log('   DATABASE_URL:', mainUrl ? '有 ✓' : '无 ✗');
-console.log('   DATABASE_PUBLIC_URL:', publicUrl ? '有 ✓' : '无 ✗');
-
-// 优先使用 DATABASE_URL（Railway 内部通信，无需 SSL）
-if (mainUrl) {
-  console.log('[DB] → 使用 DATABASE_URL（内部连接）');
-  var pool = new Pool({
-    connectionString: mainUrl,
-    ssl: false,
-    connectionTimeoutMillis: 15000,
-  });
-} else if (publicUrl) {
-  console.log('[DB] → 使用 DATABASE_PUBLIC_URL（公网连接）');
-
-  // 使用 Node.js URL 解析器，正确处理密码中的冒号等特殊字符
-  const parsedUrl = new URL(publicUrl);
-  const host = parsedUrl.hostname;
-  const port = parseInt(parsedUrl.port) || 5432;
-  const user = parsedUrl.username;
-  const password = parsedUrl.password;
-  const database = parsedUrl.pathname.replace(/^\//, '') || 'railway';
-
-  console.log('[DB] URL 解析结果:');
-  console.log('   主机:', host);
-  console.log('   端口:', port);
-  console.log('   用户:', user || '(无)');
-  console.log('   密码:', password ? `有 ✓ (${password.length}字符)` : '无 ✗');
-  console.log('   数据库:', database);
-
-  if (!password) {
-    console.error('❌ 密码为空，请检查 Railway DATABASE_PUBLIC_URL 配置');
-    process.exit(1);
-  }
-
-  // pg v8 将 sslmode=require 当作 verify-full（全验证），无法绕过
-  // Railway 代理证书不在 Node 信任链，验证必败
-  // 解决方案：sslmode=disable，连接走明文 TCP，Frp SSH 隧道本身已加密
-  const connectionString = `postgresql://${user}:${password}@${host}:${port}/${database}?sslmode=disable`;
-
-  var pool = new Pool({
-    connectionString,
-    ssl: false,
-    connectionTimeoutMillis: 15000,
-  });
-
-  console.log('[DB] SSL: sslmode=disable（数据通过 Frp SSH 隧道加密）');
-  console.log('[DB] 连接: postgresql://...@', host + ':' + port + '/', database);
-} else {
-  console.error('❌ 未找到数据库连接信息');
+if (!mainUrl) {
+  console.error('❌ 未找到 DATABASE_URL，请确认 PostgreSQL 在同一 Railway 项目中');
   process.exit(1);
 }
+
+// 使用 Railway 内部网络，绕过公网代理，无 SSL 问题
+var pool = new Pool({
+  connectionString: mainUrl,
+  ssl: false,
+  connectionTimeoutMillis: 15000,
+});
+console.log('[DB] 使用 DATABASE_URL（Railway 内部网络，无 SSL）');
+console.log('[DB] 连接字符串已隐藏保护');
 
 // 立即测试连接
 pool.connect((err, client, release) => {
