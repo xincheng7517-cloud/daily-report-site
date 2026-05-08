@@ -20,14 +20,7 @@ if (mainUrl) {
   console.log('[DB] → 使用 DATABASE_PUBLIC_URL（公网连接）');
 
   // 使用 Node.js URL 解析器，正确处理密码中的冒号等特殊字符
-  let parsedUrl;
-  try {
-    parsedUrl = new URL(publicUrl);
-  } catch (e) {
-    console.error('❌ 无法解析 DATABASE_PUBLIC_URL:', e.message);
-    process.exit(1);
-  }
-
+  const parsedUrl = new URL(publicUrl);
   const host = parsedUrl.hostname;
   const port = parseInt(parsedUrl.port) || 5432;
   const user = parsedUrl.username;
@@ -46,20 +39,21 @@ if (mainUrl) {
     process.exit(1);
   }
 
-  // Railway 公网代理连接配置
-  // pg v8 + Railway turntable 代理: 使用 ssl=false
-  // 原因: Railway 公网代理(turntable.proxy.rlwy.net)拒绝了pg v8的SSL请求,
-  //       但Frp隧道本身已加密(SSH隧道)，无需应用层SSL
-  const connStr = `postgresql://${user}:${password}@${host}:${port}/${database}`;
+  // pg v8 兼容模式：强制使用 libpq 兼容路径处理 SSL 参数
+  // sslmode=require 让连接始终使用 TLS，但允许非标准证书（rejectUnauthorized:false）
+  const connectionString = `postgresql://${user}:${password}@${host}:${port}/${database}?sslmode=require`;
+
   var pool = new Pool({
-    connectionString: connStr,
-    ssl: false,
+    connectionString,
+    uselibpqcompat: true,
+    ssl: {
+      rejectUnauthorized: false,
+    },
     connectionTimeoutMillis: 15000,
   });
 
-  console.log('[DB] SSL: 关闭（依赖 Frp 隧道加密）');
-  console.log('[DB] 连接:', connStr.replace(password, '********'));
-
+  console.log('[DB] SSL: uselibpqcompat + sslmode=require + rejectUnauthorized=false');
+  console.log('[DB] 连接: postgresql://...@', host + ':' + port + '/', database);
 } else {
   console.error('❌ 未找到数据库连接信息');
   process.exit(1);
@@ -70,14 +64,13 @@ pool.connect((err, client, release) => {
   if (err) {
     console.error('❌ 数据库连接失败:', err.message);
     console.error('   错误代码:', err.code);
-    console.error('   错误详情:', err.stack);
   } else {
     console.log('✅ 数据库连接成功！');
     release();
   }
 });
 
-// 带重试的初始化（Railway Postgres 启动可能比 Node 服务慢）
+// 带重试的初始化
 async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
   for (let i = 1; i <= maxRetries; i++) {
     let client;
@@ -85,13 +78,11 @@ async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
       client = await pool.connect();
       const fs = require('fs');
 
-      // 读取本地迁移数据
       let existingUsers = [];
       try { existingUsers = JSON.parse(fs.readFileSync('./users.json', 'utf8')); } catch (e) {}
       let existingReports = [];
       try { existingReports = JSON.parse(fs.readFileSync('./reports.json', 'utf8')); } catch (e) {}
 
-      // 建表
       await client.query(`
         CREATE TABLE IF NOT EXISTS users (
           id SERIAL PRIMARY KEY,
@@ -114,7 +105,6 @@ async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
         )
       `);
 
-      // 迁移 users（去重）
       for (const u of existingUsers) {
         const exist = await client.query('SELECT id FROM users WHERE id = $1', [u.id]);
         if (exist.rows.length === 0) {
@@ -127,7 +117,6 @@ async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
         }
       }
 
-      // 迁移 reports（去重）
       for (const r of existingReports) {
         const exist = await client.query(
           'SELECT id FROM reports WHERE user_id = $1 AND date = $2',
@@ -182,6 +171,20 @@ function getActiveUsers() {
   return pool.query('SELECT id, name, is_admin as "isAdmin", active FROM users WHERE active = 1 ORDER BY id');
 }
 
+function addUser(name, password) {
+  return pool.query(
+    'INSERT INTO users (name, password, active, is_admin) VALUES ($1,$2,1,FALSE) RETURNING id',
+    [name.trim(), password.trim()]
+  );
+}
+
+function toggleUser(id) {
+  return pool.query(
+    `UPDATE users SET active = CASE WHEN active=1 THEN 0 ELSE 1 END WHERE id = $1 RETURNING active`,
+    [id]
+  );
+}
+
 // ========== 日报查询 ==========
 
 function getReports() {
@@ -212,6 +215,6 @@ function updateReport(userId, date, mileage, content, submittedAt) {
 }
 
 module.exports = {
-  findUser, getUsers, getActiveUsers,
+  findUser, getUsers, getActiveUsers, addUser, toggleUser,
   getReports, getReport, addReport, updateReport, pool
 };

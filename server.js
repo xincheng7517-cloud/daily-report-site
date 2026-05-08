@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { findUser, getUsers, getActiveUsers, getReports, getReport, addReport, updateReport, pool } = require('./database');
+const { findUser, getUsers, getActiveUsers, getReports, getReport, addReport, updateReport, addUser, toggleUser } = require('./database');
 
 const app = express();
 const PORT = parseInt(process.env.PORT) || 3000;
@@ -73,10 +73,7 @@ app.post('/api/register', requireAdmin, async (req, res) => {
   if (!name || !password) {
     return res.status(400).json({ error: '姓名和密码不能为空' });
   }
-  const result = await pool.query(
-    'INSERT INTO users (name, password, active, is_admin) VALUES ($1,$2,1,FALSE) RETURNING id',
-    [name.trim(), password.trim()]
-  );
+  const result = await addUser(name.trim(), password.trim());
   res.json({ success: true, id: result.rows[0].id });
 });
 
@@ -181,21 +178,16 @@ app.post('/api/members', requireAdmin, async (req, res) => {
   if (!name || !password) {
     return res.status(400).json({ error: '姓名和密码不能为空' });
   }
-  const result = await pool.query(
-    'INSERT INTO users (name, password, active, is_admin) VALUES ($1,$2,1,FALSE) RETURNING id',
-    [name.trim(), password.trim()]
-  );
+  const result = await addUser(name.trim(), password.trim());
   res.json({ success: true, id: result.rows[0].id });
 });
 
 // 切换成员状态（仅管理员）
 app.put('/api/members/:id/toggle', requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
-  const exist = await pool.query('SELECT id, active FROM users WHERE id = $1', [id]);
-  if (exist.rows.length === 0) return res.status(404).json({ error: '成员不存在' });
-  const newActive = exist.rows[0].active ? 0 : 1;
-  await pool.query('UPDATE users SET active = $1 WHERE id = $2', [newActive, id]);
-  res.json({ success: true, active: newActive });
+  const result = await toggleUser(id);
+  if (result.rows.length === 0) return res.status(404).json({ error: '成员不存在' });
+  res.json({ success: true, active: result.rows[0].active });
 });
 
 // 免登录汇总查询（供自动化任务调用，需要 serviceKey）
