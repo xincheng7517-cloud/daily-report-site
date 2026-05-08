@@ -39,20 +39,18 @@ if (mainUrl) {
     process.exit(1);
   }
 
-  // pg v8 兼容模式：强制使用 libpq 兼容路径处理 SSL 参数
-  // sslmode=require 让连接始终使用 TLS，但允许非标准证书（rejectUnauthorized:false）
-  const connectionString = `postgresql://${user}:${password}@${host}:${port}/${database}?sslmode=require`;
+  // pg v8 将 sslmode=require 当作 verify-full（全验证），无法绕过
+  // Railway 代理证书不在 Node 信任链，验证必败
+  // 解决方案：sslmode=disable，连接走明文 TCP，Frp SSH 隧道本身已加密
+  const connectionString = `postgresql://${user}:${password}@${host}:${port}/${database}?sslmode=disable`;
 
   var pool = new Pool({
     connectionString,
-    uselibpqcompat: true,
-    ssl: {
-      rejectUnauthorized: false,
-    },
+    ssl: false,
     connectionTimeoutMillis: 15000,
   });
 
-  console.log('[DB] SSL: uselibpqcompat + sslmode=require + rejectUnauthorized=false');
+  console.log('[DB] SSL: sslmode=disable（数据通过 Frp SSH 隧道加密）');
   console.log('[DB] 连接: postgresql://...@', host + ':' + port + '/', database);
 } else {
   console.error('❌ 未找到数据库连接信息');
