@@ -1,64 +1,82 @@
 const { Pool } = require('pg');
 
-// Railway PostgreSQL 连接
+// Railway 数据库连接
 const publicUrl = process.env.DATABASE_PUBLIC_URL;
 const mainUrl = process.env.DATABASE_URL;
-const internalHost = process.env.DATABASE_HOST;
-const internalPort = process.env.DATABASE_PORT;
-const internalUser = process.env.DATABASE_USER;
-const internalPassword = process.env.DATABASE_PASSWORD;
-const internalDb = process.env.DATABASE_DATABASE;
 
-console.log('[DB] 可用变量:');
-console.log('   DATABASE_URL:', mainUrl ? `有 (${mainUrl.substring(0, 50)}...)` : '无');
-console.log('   DATABASE_PUBLIC_URL:', publicUrl ? '有' : '无');
-console.log('   DATABASE_HOST:', internalHost || '无');
-console.log('   DATABASE_PORT:', internalPort || '无');
-console.log('   DATABASE_USER:', internalUser || '无');
-console.log('   DATABASE_PASSWORD:', internalPassword ? '有' : '无');
-console.log('   DATABASE_DATABASE:', internalDb || '无');
+console.log('[DB] 检测到的环境变量:');
+console.log('   DATABASE_URL:', mainUrl ? '有 ✓' : '无 ✗');
+console.log('   DATABASE_PUBLIC_URL:', publicUrl ? '有 ✓' : '无 ✗');
 
-// 优先使用内部网络参数（Railway 内部通信不需要 SSL）
-const useInternal = internalHost && internalPort && internalUser && internalPassword && internalDb;
-let connectionString;
-let useSSL = false;
-
-if (useInternal) {
-  connectionString = `postgresql://${internalUser}:${internalPassword}@${internalHost}:${internalPort}/${internalDb}`;
-  useSSL = false;
-  console.log('[DB] 使用内部网络连接');
+// 优先使用 DATABASE_URL（Railway 内部通信，无需 SSL）
+if (mainUrl) {
+  console.log('[DB] → 使用 DATABASE_URL（内部连接）');
+  var pool = new Pool({
+    connectionString: mainUrl,
+    ssl: false,
+    connectionTimeoutMillis: 15000,
+  });
 } else if (publicUrl) {
-  // Railway 公网代理：尝试 uselibpqcompat 模式
-  const separator = publicUrl.includes('?') ? '&' : '?';
-  connectionString = publicUrl + separator + 'uselibpqcompat=true&sslmode=require';
-  useSSL = false; // uselibpqcompat 下 sslmode 在连接字符串中处理
-  console.log('[DB] 使用公网代理连接 (uselibpqcompat 模式)');
-} else if (mainUrl) {
-  connectionString = mainUrl;
-  useSSL = mainUrl.includes('proxy.rlwy');
-  console.log('[DB] 使用 DATABASE_URL');
+  console.log('[DB] → 使用 DATABASE_PUBLIC_URL（公网连接）');
+
+  // 使用 Node.js URL 解析器，正确处理密码中的特殊字符（包括冒号 : 和 @）
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(publicUrl);
+  } catch (e) {
+    console.error('❌ 无法解析 DATABASE_PUBLIC_URL:', e.message);
+    console.error('   原始 URL:', publicUrl);
+    process.exit(1);
+  }
+
+  const host = parsedUrl.hostname;
+  const port = parsedUrl.port || '5432';
+  const user = parsedUrl.username;
+  const password = parsedUrl.password;
+  const database = parsedUrl.pathname.replace(/^\//, '') || 'railway';
+
+  console.log('[DB] URL 解析结果:');
+  console.log('   主机:', host);
+  console.log('   端口:', port);
+  console.log('   用户:', user || '(无用户名)');
+  console.log('   密码:', password ? `有 ✓ (${password.length}字符)` : '无 ✗ ← 这是问题所在！');
+  console.log('   数据库:', database);
+
+  if (!password) {
+    console.error('❌ 密码为空！Railway DATABASE_PUBLIC_URL 格式可能有问题');
+    console.error('   请检查 Railway 控制台中 DATABASE_PUBLIC_URL 的完整内容');
+    console.error('   提示: URL 密码中的 @ 符号需要编码为 %40');
+    process.exit(1);
+  }
+
+  // 强制 SSL，证书验证可选（本地开发用 no-verify）
+  const isLocal = process.env.NODE_ENV !== 'production';
+  pool = new Pool({
+    host,
+    port,
+    user,
+    password,
+    database,
+    ssl: {
+      rejectUnauthorized: false,  // Railway 证书不在 Node 信任链中
+    },
+    connectionTimeoutMillis: 15000,
+  });
+
+  console.log('[DB] SSL 配置: rejectUnauthorized = false (', isLocal ? '本地模式' : '生产模式', ')');
 } else {
-  console.error('❌ 未找到数据库连接信息');
+  console.error('❌ 未找到数据库连接信息 (DATABASE_URL 和 DATABASE_PUBLIC_URL 都无)');
   process.exit(1);
 }
-
-console.log('[DB] 主机:', connectionString.match(/@([^/?:]+)/)?.[1] || '未知');
-console.log('[DB] 连接字符串:', connectionString);
-
-const pool = new Pool({
-  connectionString,
-  ssl: useSSL ? { rejectUnauthorized: false } : false,
-  connectionTimeoutMillis: 10000,
-  query_timeout: 10000,
-});
 
 // 立即测试连接
 pool.connect((err, client, release) => {
   if (err) {
     console.error('❌ 数据库连接失败:', err.message);
     console.error('   错误代码:', err.code);
+    console.error('   错误详情:', err.stack);
   } else {
-    console.log('✅ 数据库连接成功');
+    console.log('✅ 数据库连接成功！');
     release();
   }
 });
