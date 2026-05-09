@@ -66,28 +66,35 @@ async function initPool() {
         password = url.password;
         user = url.username || pgUser;
         database = url.pathname.replace(/^\//, '') || pgDatabase;
-        console.log('[DB] 从 DATABASE_URL 解析密码/用户/数据库');
+        console.log(`[DB] 从 DATABASE_URL 解析: user="${user}" password="${password ? '***' : '空'}" database="${database}" hostname="${url.hostname}"`);
+        console.log(`[DB] 原始 URL: ${mainUrl}`);
       } catch (e) {
         console.error('[DB] 解析 DATABASE_URL 失败:', e.message);
       }
     }
 
     if (!password) {
-      console.error('❌ 未找到数据库密码（需要 PGPASSWORD 或 DATABASE_URL）');
-      process.exit(1);
+      console.warn('[DB] ⚠️ 密码为空，fallback 到直接使用 DATABASE_URL 作为连接串');
+      console.warn('[DB] 注意：这会走默认 DNS 解析，如有问题请检查 PGHOST 配置');
+      pool = new Pool({
+        connectionString: mainUrl,
+        ssl: false,
+        connectionTimeoutMillis: 15000,
+      });
+      console.log('[DB] → 使用 DATABASE_URL 连接串（DNS 走默认）');
+    } else {
+      console.log(`[DB] → 使用 IPv4 连接: ${ipv4Host}:5432`);
+      pool = new Pool({
+        host: ipv4Host,
+        port: 5432,
+        user,
+        password,
+        database,
+        ssl: false,
+        connectionTimeoutMillis: 15000,
+        family: 4,
+      });
     }
-
-    console.log(`[DB] → 使用 IPv4 连接: ${ipv4Host}:5432`);
-    pool = new Pool({
-      host: ipv4Host,
-      port: 5432,
-      user,
-      password,
-      database,
-      ssl: false,
-      connectionTimeoutMillis: 15000,
-      family: 4,
-    });
   }
 
   // --- 策略3：本地开发用公网连接 ---
