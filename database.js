@@ -1,30 +1,49 @@
 const { Pool } = require('pg');
 const fs = require('fs');
-const tls = require('tls');
 
-// Railway 连接
-const mainUrl = process.env.DATABASE_URL;       // 内部网络（ Railway 部署时）
-const publicUrl = process.env.DATABASE_PUBLIC_URL; // 公网连接（本地开发时）
+// Railway 连接策略：
+// 1. 优先用 PGHOST（IPv4 地址）+ PGPASSWORD 拼连接串
+// 2. fallback: 直接用 DATABASE_URL
+// 3. 本地开发：用 DATABASE_PUBLIC_URL + SSL
+
+const pgHost = process.env.PGHOST;
+const pgPassword = process.env.PGPASSWORD;
+const pgUser = process.env.PGUSER || 'postgres';
+const pgDatabase = process.env.PGDATABASE || 'railway';
+const mainUrl = process.env.DATABASE_URL;
+const publicUrl = process.env.DATABASE_PUBLIC_URL;
 
 console.log('[DB] 检测环境变量:');
+console.log('   PGHOST:', pgHost || '无 ✗');
 console.log('   DATABASE_URL:', mainUrl ? '有 ✓' : '无 ✗');
 console.log('   DATABASE_PUBLIC_URL:', publicUrl ? '有 ✓' : '无 ✗');
 
 let pool;
 
-if (mainUrl) {
-  // ===== Railway 内部网络，无需 SSL =====
-  console.log('[DB] → 使用 DATABASE_URL（Railway 内部网络）');
+// ===== 策略1：Railway 内部网络（用 PGHOST IPv4 地址）=====
+if (pgHost && pgPassword) {
+  const connectionString = `postgresql://${pgUser}:${pgPassword}@${pgHost}:5432/${pgDatabase}`;
+  console.log('[DB] → 使用 PGHOST（IPv4 内部连接）');
+  console.log('[DB] 主机:', pgHost + ':5432');
+
+  pool = new Pool({
+    connectionString,
+    ssl: false,
+    connectionTimeoutMillis: 15000,
+  });
+
+// ===== 策略2：fallback 用 DATABASE_URL =====
+} else if (mainUrl) {
+  console.log('[DB] → 使用 DATABASE_URL（内部连接）');
   pool = new Pool({
     connectionString: mainUrl,
     ssl: false,
     connectionTimeoutMillis: 15000,
   });
 
+// ===== 策略3：本地开发用公网连接 =====
 } else if (publicUrl) {
-  // ===== 公网连接，必须走 SSL =====
-  console.log('[DB] → 使用 DATABASE_PUBLIC_URL（公网连接）');
-
+  console.log('[DB] → 使用 DATABASE_PUBLIC_URL（公网 SSL 连接）');
   const parsed = new URL(publicUrl);
   const host = parsed.hostname;
   const port = parseInt(parsed.port) || 5432;
@@ -32,39 +51,26 @@ if (mainUrl) {
   const password = parsed.password;
   const database = parsed.pathname.replace(/^\//, '') || 'railway';
 
-  console.log('   主机:', host, '端口:', port, '数据库:', database);
-
   if (!password) {
     console.error('❌ 密码为空，请检查 DATABASE_PUBLIC_URL');
     process.exit(1);
   }
 
-  // pg v8 的 sslmode=require 会做 hostname 验证
-  // 改用 connectionString + ssl: true + rejectUnauthorized 仍会验证主机名
-  // 用自定义 tls.connect 绕过 hostname 验证
   const connectionString = `postgresql://${user}:${password}@${host}:${port}/${database}`;
-
-  // Railway 公网代理使用 SSL，pg v8 + Node.js tls 会验证主机名
-  // Railway 证书 CN 是 *.railway.dev，与 turntable.proxy.rlwy.net 不匹配
-  // 用 checkServerIdentity 强制跳过主机名验证
-  let sslConfig;
-  try {
-    const caCert = fs.readFileSync('/etc/ssl/certs/ca-certificates.crt');
-    sslConfig = { ca: caCert, rejectUnauthorized: false, checkServerIdentity: () => undefined };
-    console.log('[DB] SSL: 系统 CA + 跳过主机名验证');
-  } catch (e) {
-    sslConfig = { rejectUnauthorized: false, checkServerIdentity: () => undefined };
-    console.log('[DB] SSL: rejectUnauthorized=false + 跳过主机名验证');
-  }
 
   pool = new Pool({
     connectionString,
-    ssl: sslConfig,
+    ssl: {
+      rejectUnauthorized: false,
+      checkServerIdentity: () => undefined, // 跳过主机名验证
+    },
     connectionTimeoutMillis: 15000,
   });
+  console.log('[DB] SSL: rejectUnauthorized=false + 跳过主机名验证');
 
 } else {
-  console.error('❌ 未找到数据库连接信息（DATABASE_URL 和 DATABASE_PUBLIC_URL 都缺失）');
+  console.error('❌ 未找到数据库连接信息');
+  console.error('   需要 PGHOST + PGPASSWORD 或 DATABASE_URL 或 DATABASE_PUBLIC_URL');
   process.exit(1);
 }
 
@@ -73,10 +79,9 @@ pool.connect((err, client, release) => {
   if (err) {
     console.error('❌ 数据库连接失败:', err.message);
     console.error('   错误代码:', err.code);
-    if (err.code === 'ENOTFOUND') console.error('   → 主机名解析失败，检查网络');
-    if (err.message.includes('Connection terminated')) {
-      console.error('   → 连接被重置，Railway 公网代理要求 SSL，请确认 ssl 配置正确');
-    }
+    if (err.code === 'ENOTFOUND') console.error('   → 主机名解析失败');
+    if (err.code === 'ECONNREFUSED') console.error('   → 连接被拒绝，检查主机/端口');
+    if (err.message.includes('SSL')) console.error('   → SSL 握手失败');
   } else {
     console.log('✅ 数据库连接成功！');
     release();
