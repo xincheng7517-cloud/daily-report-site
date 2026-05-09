@@ -1,14 +1,15 @@
 const { Pool } = require('pg');
 const dns = require('dns');
 const { promisify } = require('util');
+const net = require('net');
 const fs = require('fs');
 
 const lookup = promisify(dns.lookup);
 
 // Railway 连接策略：
-// 1. 用 dns.lookup(family:4) 强制解析 PGHOST 为 IPv4
-// 2. 用独立参数（非 connectionString）传入 Pool，使 family:4 生效
-// 3. 本地开发：用 DATABASE_PUBLIC_URL + SSL
+// 1. Railway 公网代理（DATABASE_PUBLIC_URL）：sslmode=require，最可靠
+// 2. Railway 内部 DNS（postgres.railway.internal）：sslmode=prefer
+// 3. 本地开发：DATABASE_PUBLIC_URL + SSL
 
 const pgHost = process.env.PGHOST || 'postgres.railway.internal';
 const pgPassword = process.env.PGPASSWORD;
@@ -23,136 +24,149 @@ console.log('   PGPASSWORD:', pgPassword ? '有 ✓' : '无 ✗');
 console.log('   DATABASE_URL:', mainUrl ? '有 ✓' : '无 ✗');
 console.log('   DATABASE_PUBLIC_URL:', publicUrl ? '有 ✓' : '无 ✗');
 
-// 异步初始化 pool，所有查询函数在使用 pool 前会先 await poolReady
+// 解析 DATABASE_URL 的各部分
+function parseDatabaseUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    return {
+      hostname: u.hostname,
+      port: parseInt(u.port) || 5432,
+      user: u.username,
+      password: u.password,
+      database: u.pathname.replace(/^\//, '') || 'railway',
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// 解析 mainUrl
+const parsedMain = mainUrl ? parseDatabaseUrl(mainUrl) : null;
+const parsedPublic = publicUrl ? parseDatabaseUrl(publicUrl) : null;
+
+// Railway 公网代理格式: turntable.proxy.rlwy.net:31704
+// 来自 DATABASE_PUBLIC_URL 的 pg 连接串格式: postgresql://user:pass@host:port/db
+// 如果有公网 URL，优先用公网代理方式连接（SSL 可靠）
+// Railway 的公网代理通过 HTTPS/WebSocket 转发，更稳定
+
 let pool = null;
-let poolReady = null;
 
 async function initPool() {
-  // --- 策略1 & 2：Railway 内部网络，强制 IPv4 ---
-  if (pgHost || mainUrl) {
-    // 用 dns.lookup 强制解析为 IPv4
-    let ipv4Host = pgHost;  // 如果 PGHOST 已经是 IP 地址，直接用
-    const isIpv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(pgHost);
-
-    if (!isIpv4) {
-      try {
-        const { address, family } = await lookup(pgHost, { family: 4 });
-        ipv4Host = address;
-        console.log(`[DB] DNS强制IPv4解析: ${pgHost} → ${address} (family=${family})`);
-      } catch (e) {
-        console.error(`[DB] ⚠️ DNS IPv4解析失败: ${e.message}，打印可用地址...`);
-        try {
-          const addrs = await new Promise((r,j) => dns.resolve4(pgHost, (e,a) => e ? j(e) : r(a)));
-          console.log(`[DB] DNS A记录: ${JSON.stringify(addrs)}`);
-        } catch(e2) { console.error(`[DB] DNS A记录查询也失败: ${e2.message}`); }
-        try {
-          const addrs = await new Promise((r,j) => dns.resolve6(pgHost, (e,a) => e ? j(e) : r(a)));
-          console.log(`[DB] DNS AAAA记录: ${JSON.stringify(addrs)}`);
-        } catch(e2) { console.error(`[DB] DNS AAAA记录查询也失败: ${e2.message}`); }
-        ipv4Host = pgHost;
-      }
-    } else {
-      console.log(`[DB] PGHOST 已是 IPv4 地址: ${pgHost}`);
-    }
-
-    // 确定密码和用户
-    let user = pgUser;
-    let password = pgPassword;
-    let database = pgDatabase;
-
-    if (!password && mainUrl) {
-      try {
-        const url = new URL(mainUrl);
-        password = url.password;
-        user = url.username || pgUser;
-        database = url.pathname.replace(/^\//, '') || pgDatabase;
-        console.log(`[DB] 从 DATABASE_URL 解析: user="${user}" password="${password ? '***' : '空'}" database="${database}" hostname="${url.hostname}"`);
-        console.log(`[DB] 原始 URL: ${mainUrl}`);
-      } catch (e) {
-        console.error('[DB] 解析 DATABASE_URL 失败:', e.message);
-      }
-    }
-
-    if (!password) {
-      console.warn('[DB] ⚠️ 密码为空，fallback 到直接使用 DATABASE_URL 作为连接串');
-      console.warn('[DB] 注意：这会走默认 DNS 解析，如有问题请检查 PGHOST 配置');
-      pool = new Pool({
-        connectionString: mainUrl,
-        ssl: false,
-        connectionTimeoutMillis: 15000,
-      });
-      console.log('[DB] → 使用 DATABASE_URL 连接串（DNS 走默认）');
-    } else {
-      console.log(`[DB] → 使用 IPv4 连接: ${ipv4Host}:5432`);
-      pool = new Pool({
-        host: ipv4Host,
-        port: 5432,
-        user,
-        password,
-        database,
-        ssl: false,
-        connectionTimeoutMillis: 15000,
-        family: 4,
-      });
-    }
-  }
-
-  // --- 策略3：本地开发用公网连接 ---
-  if (!pool && publicUrl) {
-    console.log('[DB] → 使用 DATABASE_PUBLIC_URL（公网 SSL 连接）');
-    const parsed = new URL(publicUrl);
-    const host = parsed.hostname;
-    const port = parseInt(parsed.port) || 5432;
-    const user = parsed.username;
-    const password = parsed.password;
-    const database = parsed.pathname.replace(/^\//, '') || 'railway';
-
-    if (!password) {
-      console.error('❌ 密码为空，请检查 DATABASE_PUBLIC_URL');
-      process.exit(1);
-    }
-
+  // --- 策略1：有 DATABASE_PUBLIC_URL → 用公网代理 + SSL ---
+  if (parsedPublic) {
+    const p = parsedPublic;
+    console.log(`[DB] → 使用 DATABASE_PUBLIC_URL 公网代理 + SSL`);
+    console.log(`[DB] 代理: ${p.hostname}:${p.port}`);
     pool = new Pool({
-      host,
-      port,
-      user,
-      password,
-      database,
+      host: p.hostname,
+      port: p.port,
+      user: p.user,
+      password: p.password,
+      database: p.database,
       ssl: {
         rejectUnauthorized: false,
-        checkServerIdentity: () => undefined,
       },
-      connectionTimeoutMillis: 15000,
-      family: 4,
+      connectionTimeoutMillis: 20000,
     });
-    console.log('[DB] SSL: rejectUnauthorized=false');
+  }
+
+  // --- 策略2：无公网URL但有内部URL → Railway 内部网络 ---
+  else if (parsedMain) {
+    const p = parsedMain;
+
+    // Railway 内部 DNS 解析（强制 IPv4）
+    let targetHost = pgHost;
+    if (pgHost !== 'postgres.railway.internal' && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(pgHost)) {
+      // pgHost 是 postgres.railway.internal 或其他主机名，需要 DNS 解析
+      try {
+        const { address } = await lookup(pgHost, { family: 4 });
+        targetHost = address;
+        console.log(`[DB] DNS IPv4 解析: ${pgHost} → ${address}`);
+      } catch (e) {
+        console.log(`[DB] DNS IPv4 解析失败: ${e.message}，尝试 IPv6`);
+        try {
+          const { address } = await lookup(pgHost, { family: 6 });
+          targetHost = address;
+          console.log(`[DB] DNS IPv6 解析: ${pgHost} → ${address}`);
+        } catch (e2) {
+          console.error(`[DB] DNS 解析全部失败: ${e2.message}`);
+          targetHost = pgHost;
+        }
+      }
+    }
+
+    console.log(`[DB] → Railway 内部连接: ${targetHost}:5432`);
+    console.log(`[DB] 密码: ${p.password ? '已设置' : '未设置！'}`);
+
+    // Railway 内部 PostgreSQL：尝试 sslmode=prefer
+    pool = new Pool({
+      host: targetHost,
+      port: 5432,
+      user: p.user,
+      password: p.password,
+      database: p.database,
+      // Railway 内部 SSL：prefer 表示优先 SSL，不行就退到明文
+      ssl: 'prefer',
+      connectionTimeoutMillis: 20000,
+    });
+  }
+
+  // --- 策略3：纯手动参数（只有 PGHOST+PGPASSWORD） ---
+  else if (pgHost && pgPassword) {
+    let targetHost = pgHost;
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(pgHost)) {
+      try {
+        const { address } = await lookup(pgHost, { family: 4 });
+        targetHost = address;
+      } catch (e) { targetHost = pgHost; }
+    }
+    console.log(`[DB] → 使用 PGHOST+PGPASSWORD: ${targetHost}:5432`);
+    pool = new Pool({
+      host: targetHost,
+      port: 5432,
+      user: pgUser,
+      password: pgPassword,
+      database: pgDatabase,
+      ssl: 'prefer',
+      connectionTimeoutMillis: 20000,
+    });
   }
 
   if (!pool) {
     console.error('❌ 未找到数据库连接信息');
-    console.error('   需要 PGHOST + PGPASSWORD 或 DATABASE_URL 或 DATABASE_PUBLIC_URL');
     process.exit(1);
   }
 
   // 立即测试连接
+  console.log('[DB] 正在连接...');
   try {
     const client = await pool.connect();
     console.log('✅ 数据库连接成功！');
     client.release();
   } catch (err) {
     console.error('❌ 数据库连接失败:', err.message);
-    console.error('   错误代码:', err.code);
-    // 不立即退出，让重试逻辑处理
+    console.error('   错误代码:', err.code || '(无)');
+    if (err.message.includes('ssl')) console.error('   → SSL 问题，尝试检查 ssl 配置');
+    if (err.code === 'ECONNREFUSED') console.error('   → 连接被拒绝');
+    if (err.code === 'ETIMEDOUT') console.error('   → 连接超时');
+    if (err.code === 'ENOTFOUND') console.error('   → 主机名未找到');
   }
 
   return pool;
 }
 
-poolReady = initPool();
+// 异步 pool 初始化
+const poolReady = initPool();
 
-// 带重试的初始化
+// 带重试的初始化（等待 poolReady 完成后再重试）
 async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
-  const p = await poolReady;  // 等待 pool 初始化完成
+  // 先等待 pool 初始化
+  const p = await poolReady;
+  if (!p) {
+    console.error('[DB] pool 初始化失败，无法继续');
+    return;
+  }
+
   for (let i = 1; i <= maxRetries; i++) {
     let client;
     try {
@@ -221,7 +235,6 @@ async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
         await new Promise(r => setTimeout(r, intervalMs));
       } else {
         console.error('❌ 数据库初始化最终失败');
-        throw err;
       }
     } finally {
       if (client) try { client.release(); } catch (e) {}
@@ -233,7 +246,8 @@ initDBWithRetry().catch(err => {
   console.error('❌ 数据库初始化失败:', err.message);
 });
 
-// 确保 pool 已就绪的辅助函数
+// ========== 辅助函数 ==========
+
 async function getPool() {
   if (!pool) await poolReady;
   return pool;

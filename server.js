@@ -14,7 +14,18 @@ app.use(express.json());
 // ===== 网络诊断接口（Railway 排障用）=====
 app.get('/api/debug/net', async (req, res) => {
   const pgHost = process.env.PGHOST || 'postgres.railway.internal';
+  const mainUrl = process.env.DATABASE_URL;
+  const publicUrl = process.env.DATABASE_PUBLIC_URL;
   const results = { pgHost };
+
+  function parseUrl(urlStr) {
+    try {
+      const u = new URL(urlStr);
+      return { hostname: u.hostname, port: u.port, user: u.username, password: u.password ? '***' : '空', database: u.pathname.replace(/^\//,'') };
+    } catch(e) { return { error: e.message }; }
+  }
+  results.DATABASE_URL_parsed = mainUrl ? parseUrl(mainUrl) : null;
+  results.DATABASE_PUBLIC_URL_parsed = publicUrl ? parseUrl(publicUrl) : null;
 
   // DNS 解析
   try {
@@ -30,19 +41,20 @@ app.get('/api/debug/net', async (req, res) => {
   const checkPort = (host, port) => new Promise(r => {
     const s = net.createConnection(port, host).on('connect', () => { s.destroy(); r({ host, port, ok: true }); })
       .on('error', e => r({ host, port, ok: false, error: e.code }));
-    setTimeout(() => { try { s.destroy(); } catch(e){} r({ host, port, ok: false, error: 'TIMEOUT' }); }, 3000);
+    setTimeout(() => { try { s.destroy(); } catch(e){} r({ host, port, ok: false, error: 'TIMEOUT' }); }, 5000);
   });
 
   if (results.dns_ipv4) results.portcheck_ipv4 = await checkPort(results.dns_ipv4, 5432);
   if (results.dns_ipv6) results.portcheck_ipv6 = await checkPort(results.dns_ipv6, 5432);
-  results.portcheck_direct = await checkPort('10.181.189.167', 5432);
+  results.portcheck_direct_443 = await checkPort('turntable.proxy.rlwy.net', 443);
+  results.portcheck_direct_5432 = await checkPort('10.181.189.167', 5432);
 
   results.env = {
-    NODE_ENV: process.env.NODE_ENV,
     PORT: process.env.PORT,
-    PGHOST: process.env.PGHOST,
+    PGHOST: pgHost,
     PGPASSWORD: process.env.PGPASSWORD ? '***' : 'undefined',
-    DATABASE_URL_HOST: (() => { try { return new URL(process.env.DATABASE_URL).hostname; } catch(e) { return 'parse error'; } })(),
+    DATABASE_URL_HOST: mainUrl ? new URL(mainUrl).hostname : 'N/A',
+    DATABASE_PUBLIC_URL_HOST: publicUrl ? new URL(publicUrl).hostname : 'N/A',
   };
 
   res.json(results);
