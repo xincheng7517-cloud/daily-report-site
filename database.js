@@ -20,9 +20,15 @@ const publicUrl = process.env.DATABASE_PUBLIC_URL;
 
 console.log('[DB] 检测环境变量:');
 console.log('   PGHOST:', pgHost);
-console.log('   PGPASSWORD:', pgPassword ? '有 ✓' : '无 ✗');
+console.log('   PGPASSWORD:', pgPassword ? '有 ✓' : '无 ✗（密码在 DATABASE_URL 中）');
 console.log('   DATABASE_URL:', mainUrl ? '有 ✓' : '无 ✗');
 console.log('   DATABASE_PUBLIC_URL:', publicUrl ? '有 ✓' : '无 ✗');
+if (publicUrl) {
+  try {
+    const u = new URL(publicUrl);
+    console.log('   DATABASE_PUBLIC_URL 解析: host=' + u.hostname + ', user=' + u.username + ', db=' + u.pathname.replace(/^\//,''));
+  } catch(e) { console.log('   DATABASE_PUBLIC_URL 解析失败:', e.message); }
+}
 
 // 解析 DATABASE_URL 的各部分
 function parseDatabaseUrl(urlStr) {
@@ -57,6 +63,11 @@ async function initPool() {
     const p = parsedPublic;
     console.log(`[DB] → 使用 DATABASE_PUBLIC_URL 公网代理 + SSL`);
     console.log(`[DB] 代理: ${p.hostname}:${p.port}`);
+    console.log(`[DB] 用户: ${p.user}, 数据库: ${p.database}`);
+    console.log(`[DB] 密码长度: ${p.password ? p.password.length : 0}`);
+
+    // Railway 公网代理必须使用 SSL，但证书可能不被系统信任
+    // pg@8.x 需要 ssl: { rejectUnauthorized: false }
     pool = new Pool({
       host: p.hostname,
       port: p.port,
@@ -66,7 +77,7 @@ async function initPool() {
       ssl: {
         rejectUnauthorized: false,
       },
-      connectionTimeoutMillis: 20000,
+      connectionTimeoutMillis: 30000,
     });
   }
 
