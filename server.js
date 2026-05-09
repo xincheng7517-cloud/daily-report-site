@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const dns = require('dns');
+const net = require('net');
 const { findUser, getUsers, getActiveUsers, getReports, getReport, addReport, updateReport, addUser, toggleUser } = require('./database');
 
 const app = express();
@@ -8,6 +10,43 @@ const PORT = parseInt(process.env.PORT) || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+// ===== 网络诊断接口（Railway 排障用）=====
+app.get('/api/debug/net', async (req, res) => {
+  const pgHost = process.env.PGHOST || 'postgres.railway.internal';
+  const results = { pgHost };
+
+  // DNS 解析
+  try {
+    const v4 = await new Promise((r, j) => dns.lookup(pgHost, { family: 4 }, (e, a) => e ? j(e) : r(a)));
+    results.dns_ipv4 = v4;
+  } catch (e) { results.dns_ipv4_error = e.message; }
+  try {
+    const v6 = await new Promise((r, j) => dns.lookup(pgHost, { family: 6 }, (e, a) => e ? j(e) : r(a)));
+    results.dns_ipv6 = v6;
+  } catch (e) { results.dns_ipv6_error = e.message; }
+
+  // TCP 端口检测
+  const checkPort = (host, port) => new Promise(r => {
+    const s = net.createConnection(port, host).on('connect', () => { s.destroy(); r({ host, port, ok: true }); })
+      .on('error', e => r({ host, port, ok: false, error: e.code }));
+    setTimeout(() => { try { s.destroy(); } catch(e){} r({ host, port, ok: false, error: 'TIMEOUT' }); }, 3000);
+  });
+
+  if (results.dns_ipv4) results.portcheck_ipv4 = await checkPort(results.dns_ipv4, 5432);
+  if (results.dns_ipv6) results.portcheck_ipv6 = await checkPort(results.dns_ipv6, 5432);
+  results.portcheck_direct = await checkPort('10.181.189.167', 5432);
+
+  results.env = {
+    NODE_ENV: process.env.NODE_ENV,
+    PORT: process.env.PORT,
+    PGHOST: process.env.PGHOST,
+    PGPASSWORD: process.env.PGPASSWORD ? '***' : 'undefined',
+    DATABASE_URL_HOST: (() => { try { return new URL(process.env.DATABASE_URL).hostname; } catch(e) { return 'parse error'; } })(),
+  };
+
+  res.json(results);
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // 简易 session 存储

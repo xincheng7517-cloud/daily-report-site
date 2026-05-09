@@ -36,12 +36,20 @@ async function initPool() {
 
     if (!isIpv4) {
       try {
-        const { address } = await lookup(pgHost, { family: 4 });
+        const { address, family } = await lookup(pgHost, { family: 4 });
         ipv4Host = address;
-        console.log(`[DB] DNS解析 ${pgHost} → ${ipv4Host} (IPv4)`);
+        console.log(`[DB] DNS强制IPv4解析: ${pgHost} → ${address} (family=${family})`);
       } catch (e) {
-        console.error(`[DB] ⚠️ DNS IPv4解析失败: ${e.message}，尝试直接用主机名`);
-        ipv4Host = pgHost; // fallback: 直接用原始主机名
+        console.error(`[DB] ⚠️ DNS IPv4解析失败: ${e.message}，打印可用地址...`);
+        try {
+          const addrs = await new Promise((r,j) => dns.resolve4(pgHost, (e,a) => e ? j(e) : r(a)));
+          console.log(`[DB] DNS A记录: ${JSON.stringify(addrs)}`);
+        } catch(e2) { console.error(`[DB] DNS A记录查询也失败: ${e2.message}`); }
+        try {
+          const addrs = await new Promise((r,j) => dns.resolve6(pgHost, (e,a) => e ? j(e) : r(a)));
+          console.log(`[DB] DNS AAAA记录: ${JSON.stringify(addrs)}`);
+        } catch(e2) { console.error(`[DB] DNS AAAA记录查询也失败: ${e2.message}`); }
+        ipv4Host = pgHost;
       }
     } else {
       console.log(`[DB] PGHOST 已是 IPv4 地址: ${pgHost}`);
