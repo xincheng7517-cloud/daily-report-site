@@ -20,29 +20,53 @@ console.log('   DATABASE_PUBLIC_URL:', publicUrl ? '有 ✓' : '无 ✗');
 
 let pool;
 
-// ===== 策略1：Railway 内部网络（用 PGHOST IPv4 地址）=====
-if (pgHost && pgPassword) {
-  const connectionString = `postgresql://${pgUser}:${pgPassword}@${pgHost}:5432/${pgDatabase}`;
-  console.log('[DB] → 使用 PGHOST（IPv4 内部连接）');
-  console.log('[DB] 主机:', pgHost + ':5432');
+// 强制 IPv4，避免 Railway 内部 DNS 返回 IPv6 导致 ECONNREFUSED
+const ipv4Config = { family: 4 };
 
-  pool = new Pool({
-    connectionString,
-    ssl: false,
-    connectionTimeoutMillis: 15000,
-  });
+// ===== 策略1：PGHOST 有值，尝试构造 IPv4 连接 =====
+if (pgHost) {
+  let connectionString;
+  if (pgPassword) {
+    // PGHOST + PGPASSWORD 都齐全 → 直接拼
+    connectionString = `postgresql://${pgUser}:${pgPassword}@${pgHost}:5432/${pgDatabase}`;
+    console.log('[DB] → 使用 PGHOST + PGPASSWORD（IPv4 内部连接）');
+  } else if (mainUrl) {
+    // PGHOST 有值但 PGPASSWORD 缺失 → 从 DATABASE_URL 解析密码，用 PGHOST 当主机
+    try {
+      const url = new URL(mainUrl);
+      const pw = url.password;
+      const user = url.username || pgUser;
+      const db = url.pathname.replace(/^\//, '') || pgDatabase;
+      connectionString = `postgresql://${user}:${pw}@${pgHost}:5432/${db}`;
+      console.log('[DB] → 使用 PGHOST（从 DATABASE_URL 解析密码，强制 IPv4 主机）');
+    } catch (e) {
+      console.error('[DB] 解析 DATABASE_URL 失败:', e.message);
+    }
+  }
+  if (connectionString) {
+    console.log('[DB] 主机:', pgHost + ':5432');
+    pool = new Pool({
+      connectionString,
+      ssl: false,
+      connectionTimeoutMillis: 15000,
+      ...ipv4Config,
+    });
+  }
+}
 
-// ===== 策略2：fallback 用 DATABASE_URL =====
-} else if (mainUrl) {
-  console.log('[DB] → 使用 DATABASE_URL（内部连接）');
+// ===== 策略2：fallback 用 DATABASE_URL + 强制 IPv4 =====
+if (!pool && mainUrl) {
+  console.log('[DB] → 使用 DATABASE_URL（强制 IPv4 解析）');
   pool = new Pool({
     connectionString: mainUrl,
     ssl: false,
     connectionTimeoutMillis: 15000,
+    ...ipv4Config,
   });
+}
 
-// ===== 策略3：本地开发用公网连接 =====
-} else if (publicUrl) {
+// ===== 策略3：公网连接（本地开发）=====
+if (!pool && publicUrl) {
   console.log('[DB] → 使用 DATABASE_PUBLIC_URL（公网 SSL 连接）');
   const parsed = new URL(publicUrl);
   const host = parsed.hostname;
@@ -62,13 +86,15 @@ if (pgHost && pgPassword) {
     connectionString,
     ssl: {
       rejectUnauthorized: false,
-      checkServerIdentity: () => undefined, // 跳过主机名验证
+      checkServerIdentity: () => undefined,
     },
     connectionTimeoutMillis: 15000,
+    ...ipv4Config,
   });
   console.log('[DB] SSL: rejectUnauthorized=false + 跳过主机名验证');
+}
 
-} else {
+if (!pool) {
   console.error('❌ 未找到数据库连接信息');
   console.error('   需要 PGHOST + PGPASSWORD 或 DATABASE_URL 或 DATABASE_PUBLIC_URL');
   process.exit(1);
