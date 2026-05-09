@@ -56,6 +56,15 @@ const parsedPublic = publicUrl ? parseDatabaseUrl(publicUrl) : null;
 // Railway 的公网代理通过 HTTPS/WebSocket 转发，更稳定
 
 let pool = null;
+let useFallback = false;
+let fallbackUsers = [];
+let fallbackReports = [];
+
+// 加载 JSON 备份文件
+function loadFallbackFiles() {
+  try { fallbackUsers = JSON.parse(fs.readFileSync('./users.json', 'utf8')); } catch (e) { fallbackUsers = []; }
+  try { fallbackReports = JSON.parse(fs.readFileSync('./reports.json', 'utf8')); } catch (e) { fallbackReports = []; }
+}
 
 async function initPool() {
   // --- 策略1：有 DATABASE_PUBLIC_URL → 用公网代理 + SSL ---
@@ -144,23 +153,25 @@ async function initPool() {
   }
 
   if (!pool) {
-    console.error('❌ 未找到数据库连接信息');
-    process.exit(1);
+    console.error('⚠️ 未找到数据库连接信息，启用文件备份模式');
+    useFallback = true;
+    loadFallbackFiles();
+    console.log(`[DB][Fallback] 已加载 ${fallbackUsers.length} 个用户, ${fallbackReports.length} 条日报`);
   }
 
-  // 立即测试连接
-  console.log('[DB] 正在连接...');
-  try {
-    const client = await pool.connect();
-    console.log('✅ 数据库连接成功！');
-    client.release();
-  } catch (err) {
-    console.error('❌ 数据库连接失败:', err.message);
-    console.error('   错误代码:', err.code || '(无)');
-    if (err.message.includes('ssl')) console.error('   → SSL 问题，尝试检查 ssl 配置');
-    if (err.code === 'ECONNREFUSED') console.error('   → 连接被拒绝');
-    if (err.code === 'ETIMEDOUT') console.error('   → 连接超时');
-    if (err.code === 'ENOTFOUND') console.error('   → 主机名未找到');
+  // 立即测试连接（仅当 pool 存在时）
+  if (pool) {
+    console.log('[DB] 正在连接...');
+    try {
+      const client = await pool.connect();
+      console.log('✅ 数据库连接成功！');
+      client.release();
+    } catch (err) {
+      console.error('❌ 数据库连接失败，切换到文件备份模式:', err.message);
+      useFallback = true;
+      pool = null;
+      loadFallbackFiles();
+    }
   }
 
   return pool;
@@ -171,10 +182,18 @@ const poolReady = initPool();
 
 // 带重试的初始化（等待 poolReady 完成后再重试）
 async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
+  // Fallback 模式：跳过数据库初始化
+  if (useFallback) {
+    console.log('[DB][Fallback] 跳过数据库初始化，使用文件模式');
+    return;
+  }
+
   // 先等待 pool 初始化
   const p = await poolReady;
   if (!p) {
-    console.error('[DB] pool 初始化失败，无法继续');
+    console.error('[DB] pool 初始化失败，切换到文件备份模式');
+    useFallback = true;
+    loadFallbackFiles();
     return;
   }
 
@@ -260,6 +279,7 @@ initDBWithRetry().catch(err => {
 // ========== 辅助函数 ==========
 
 async function getPool() {
+  if (useFallback) return null; // fallback 模式下返回 null
   if (!pool) await poolReady;
   return pool;
 }
@@ -267,6 +287,10 @@ async function getPool() {
 // ========== 用户查询 ==========
 
 async function findUser(name, password) {
+  if (useFallback) {
+    const u = fallbackUsers.find(x => x.name === name && x.password === password && x.active);
+    return { rows: u ? [u] : [] };
+  }
   const p = await getPool();
   return p.query(
     'SELECT id, name, active, is_admin as "isAdmin" FROM users WHERE name = $1 AND password = $2 AND active = 1',
@@ -275,6 +299,7 @@ async function findUser(name, password) {
 }
 
 async function getUsers() {
+  if (useFallback) return { rows: fallbackUsers };
   const p = await getPool();
   return p.query(
     'SELECT id, name, password, active, is_admin as "isAdmin", created_at as "created_at" FROM users ORDER BY id'
@@ -282,11 +307,19 @@ async function getUsers() {
 }
 
 async function getActiveUsers() {
+  if (useFallback) return { rows: fallbackUsers.filter(u => u.active) };
   const p = await getPool();
   return p.query('SELECT id, name, is_admin as "isAdmin", active FROM users WHERE active = 1 ORDER BY id');
 }
 
 async function addUser(name, password) {
+  if (useFallback) {
+    const maxId = fallbackUsers.length > 0 ? Math.max(...fallbackUsers.map(u => u.id)) : 0;
+    const newUser = { id: maxId + 1, name, password, active: 1, isAdmin: false };
+    fallbackUsers.push(newUser);
+    try { fs.writeFileSync('./users.json', JSON.stringify(fallbackUsers, null, 2)); } catch(e) {}
+    return { rows: [{ id: newUser.id }] };
+  }
   const p = await getPool();
   return p.query(
     'INSERT INTO users (name, password, active, is_admin) VALUES ($1,$2,1,FALSE) RETURNING id',
@@ -295,6 +328,15 @@ async function addUser(name, password) {
 }
 
 async function toggleUser(id) {
+  if (useFallback) {
+    const u = fallbackUsers.find(x => x.id === id);
+    if (u) {
+      u.active = u.active ? 0 : 1;
+      try { fs.writeFileSync('./users.json', JSON.stringify(fallbackUsers, null, 2)); } catch(e) {}
+      return { rows: [{ active: u.active }] };
+    }
+    return { rows: [] };
+  }
   const p = await getPool();
   return p.query(
     `UPDATE users SET active = CASE WHEN active=1 THEN 0 ELSE 1 END WHERE id = $1 RETURNING active`,
@@ -305,11 +347,16 @@ async function toggleUser(id) {
 // ========== 日报查询 ==========
 
 async function getReports() {
+  if (useFallback) return { rows: fallbackReports };
   const p = await getPool();
   return p.query('SELECT id, user_id, date, mileage, content, submitted_at FROM reports ORDER BY id');
 }
 
 async function getReport(userId, date) {
+  if (useFallback) {
+    const r = fallbackReports.find(x => x.user_id === userId && x.date === date);
+    return { rows: r ? [r] : [] };
+  }
   const p = await getPool();
   return p.query(
     'SELECT id, user_id, date, mileage, content, submitted_at FROM reports WHERE user_id = $1 AND date = $2',
@@ -318,6 +365,13 @@ async function getReport(userId, date) {
 }
 
 async function addReport(report) {
+  if (useFallback) {
+    const maxId = fallbackReports.length > 0 ? Math.max(...fallbackReports.map(r => r.id)) : 0;
+    const newReport = { ...report, id: maxId + 1 };
+    fallbackReports.push(newReport);
+    try { fs.writeFileSync('./reports.json', JSON.stringify(fallbackReports, null, 2)); } catch(e) {}
+    return { rows: [{ id: newReport.id }] };
+  }
   const p = await getPool();
   return p.query(
     `INSERT INTO reports (user_id, date, mileage, content, submitted_at)
@@ -327,6 +381,16 @@ async function addReport(report) {
 }
 
 async function updateReport(userId, date, mileage, content, submittedAt) {
+  if (useFallback) {
+    const r = fallbackReports.find(x => x.user_id === userId && x.date === date);
+    if (r) {
+      r.mileage = mileage;
+      r.content = content;
+      r.submitted_at = submittedAt;
+      try { fs.writeFileSync('./reports.json', JSON.stringify(fallbackReports, null, 2)); } catch(e) {}
+    }
+    return;
+  }
   const p = await getPool();
   return p.query(
     `UPDATE reports SET mileage = $1, content = $2, submitted_at = $3
