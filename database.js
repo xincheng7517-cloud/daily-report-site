@@ -261,6 +261,11 @@ async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
         } catch(e) { /* 跳过冲突 */ }
       }
 
+      // 迁移：将旧的管理员账号"管理员/admin888"改为"xincheng/admin"
+      await client.query(
+        `UPDATE users SET name = 'xincheng', password = 'admin' WHERE name = '管理员' AND is_admin = true`
+      );
+
       for (const r of existingReports) {
         try {
           await client.query(
