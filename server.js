@@ -394,7 +394,8 @@ app.get('/api/export/xlsx', requireAdmin, async (req, res) => {
     ws['!cols'] = [{wch:6},{wch:10},{wch:8},{wch:40},{wch:50},{wch:20}];
 
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', `attachment; filename="日报汇总_${date}.xlsx"`);
+    const filename = encodeURIComponent(`日报汇总_${date}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}; filename="report_${date}.xlsx"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(buf);
   } catch (e) {
