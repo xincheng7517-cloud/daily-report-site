@@ -23,6 +23,12 @@ app.use('/submitted.html', (req, res, next) => { res.set('Cache-Control', 'no-ca
 // 服务器启动时间
 const SERVER_START = Date.now();
 
+// 获取中国时区的日期字符串 YYYY-MM-DD
+function getChinaDate(inputDate) {
+  const d = inputDate || new Date();
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' });
+}
+
 function getUptime() {
   const diff = Date.now() - SERVER_START;
   const h = Math.floor(diff / 3600000);
@@ -157,7 +163,7 @@ app.post('/api/report', auth, async (req, res) => {
   if (!content || !content.trim()) {
     return res.status(400).json({ error: '请填写明日工作内容' });
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getChinaDate();
   const now = new Date().toLocaleString('zh-CN', { hour12: false });
 
   const existing = await getReport(req.user.id, today);
@@ -177,7 +183,7 @@ app.post('/api/report', auth, async (req, res) => {
 
 // 查询今日是否已提交
 app.get('/api/report/today', auth, async (req, res) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getChinaDate();
   const result = await getReport(req.user.id, today);
   const row = result.rows[0] || null;
   res.json({ submitted: !!row, report: row });
@@ -192,7 +198,7 @@ app.put('/api/report', auth, async (req, res) => {
   if (!content || !content.trim()) {
     return res.status(400).json({ error: '请填写明日工作内容' });
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getChinaDate();
   const now = new Date().toLocaleString('zh-CN', { hour12: false });
 
   const existing = await getReport(req.user.id, today);
@@ -206,9 +212,9 @@ app.put('/api/report', auth, async (req, res) => {
 
 // 获取汇总
 app.get('/api/reports/summary', auth, async (req, res) => {
-  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  const date = req.query.date || getChinaDate();
   const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
+  const todayStr = getChinaDate(now);
   const currentHour = now.getHours();
   const afterDeadline = (date === todayStr && currentHour >= 18) || (date < todayStr);
 
@@ -218,7 +224,7 @@ app.get('/api/reports/summary', auth, async (req, res) => {
   const users = usersResult.rows.filter(u => !u.isAdmin);
   const reports = reportsResult.rows.filter(r => {
     // pg 库可能把 DATE 返回为 Date 对象，统一转字符串比较
-    const reportDate = typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().slice(0, 10);
+    const reportDate = typeof r.date === 'string' ? r.date : getChinaDate(r.date);
     return reportDate === date;
   });
 
@@ -293,9 +299,9 @@ app.get('/api/public/summary', async (req, res) => {
   if (key !== SERVICE_KEY) {
     return res.status(403).json({ error: '无效密钥' });
   }
-  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  const date = req.query.date || getChinaDate();
   const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
+  const todayStr = getChinaDate(now);
   const currentHour = now.getHours();
   const afterDeadline = (date === todayStr && currentHour >= 18) || (date < todayStr);
 
@@ -304,7 +310,7 @@ app.get('/api/public/summary', async (req, res) => {
 
   const users = usersResult.rows.filter(u => !u.isAdmin);
   const reports = reportsResult.rows.filter(r => {
-    const reportDate = typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().slice(0, 10);
+    const reportDate = typeof r.date === 'string' ? r.date : getChinaDate(r.date);
     return reportDate === date;
   });
   const reportMap = {};
@@ -359,9 +365,9 @@ app.get('/api/uptime', (req, res) => {
 // 导出 xlsx（仅管理员）
 app.get('/api/export/xlsx', requireAdmin, async (req, res) => {
   try {
-    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const date = req.query.date || getChinaDate();
     const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
+    const todayStr = getChinaDate(now);
     const currentHour = now.getHours();
     const afterDeadline = (date === todayStr && currentHour >= 18) || (date < todayStr);
 
@@ -369,7 +375,7 @@ app.get('/api/export/xlsx', requireAdmin, async (req, res) => {
     const reportsResult = await getReports();
     const users = usersResult.rows.filter(u => !u.isAdmin);
     const reports = reportsResult.rows.filter(r => {
-      const reportDate = typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().slice(0, 10);
+      const reportDate = typeof r.date === 'string' ? r.date : getChinaDate(r.date);
       return reportDate === date;
     });
     const reportMap = {};
