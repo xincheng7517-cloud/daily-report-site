@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>管理后台 - 富加监理二标日报系统</title>
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    .admin-tabs { display:flex; gap:0; margin-bottom:0; border-bottom:2px solid #e8e8e8; }
+    .admin-tabs .tab { padding:10px 24px; cursor:pointer; font-size:14px; color:#888; border-bottom:2px solid transparent; margin-bottom:-2px; transition:all .2s; }
+    .admin-tabs .tab:hover { color:#1677ff; }
+    .admin-tabs .tab.active { color:#1677ff; border-bottom-color:#1677ff; font-weight:600; }
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
+  </style>
 </head>
 <body>
 
@@ -12,46 +20,53 @@
   <h2>📊 富加监理二标日报系统 · 管理后台</h2>
   <div>
     <span class="user-info" id="userInfo"></span>
-    <button class="btn btn-default btn-sm" onclick="goDashboard()">返回</button>
     <button class="btn btn-danger btn-sm" onclick="doLogout()">退出</button>
   </div>
 </nav>
 
 <div class="container" style="align-items:flex-start;padding-top:20px;">
-  <div class="card wide-card">
+  <div class="card wide-card" style="padding-bottom:24px;">
 
-    <!-- 顶部操作栏 -->
-    <div class="top-bar">
-      <h2 id="pageTitle">日报汇总</h2>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <input type="date" class="date-picker" id="datePicker" onchange="loadSummary()" />
-        <button class="btn btn-success btn-sm" onclick="exportXLSX()">📥 导出xlsx</button>
-        <button class="btn btn-default btn-sm" onclick="exportCSV()">导出CSV</button>
+    <!-- Tabs -->
+    <div class="admin-tabs">
+      <div class="tab active" id="tabStats" onclick="switchTab('stats')">📋 日报统计</div>
+      <div class="tab" id="tabMembers" onclick="switchTab('members')">👤 人员管理</div>
+    </div>
+
+    <!-- 日报统计 -->
+    <div class="tab-content active" id="tabContentStats">
+      <div class="top-bar" style="margin-top:18px;">
+        <h2 id="pageTitle">日报汇总</h2>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="date" class="date-picker" id="datePicker" onchange="loadSummary()" />
+          <button class="btn btn-success btn-sm" onclick="exportXLSX()">📥 导出xlsx</button>
+        </div>
       </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:50px;">#</th>
+              <th>姓名</th>
+              <th style="width:80px;">状态</th>
+              <th>工作里程</th>
+              <th>工作内容摘要</th>
+              <th style="width:150px;">提交时间</th>
+              <th style="width:70px;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <p id="loadMsg" style="text-align:center;color:#999;margin-top:16px;">加载中...</p>
     </div>
 
-    <div class="stats" id="stats"></div>
-
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="width:50px;">#</th>
-            <th>姓名</th>
-            <th style="width:80px;">状态</th>
-            <th>工作里程</th>
-            <th>工作内容摘要</th>
-            <th style="width:150px;">提交时间</th>
-            <th style="width:70px;">操作</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
-    </div>
-
-    <!-- 成员管理区 -->
-    <div id="adminPanel" style="margin-top:28px;padding-top:20px;border-top:2px solid #e8e8e8;">
-      <h3 style="margin-bottom:12px;">👤 成员管理</h3>
+    <!-- 人员管理 -->
+    <div class="tab-content" id="tabContentMembers">
+      <h3 style="margin-top:18px;margin-bottom:12px;">👤 人员管理</h3>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
         <input type="text" id="newName" placeholder="新成员姓名" style="flex:1;min-width:120px;" />
         <input type="text" id="newPassword" placeholder="密码（默认000000）" value="000000" style="flex:1;min-width:140px;" />
@@ -64,7 +79,7 @@
             <tr>
               <th>姓名</th>
               <th style="width:70px;">状态</th>
-              <th style="width:160px;">操作</th>
+              <th style="width:200px;">操作</th>
             </tr>
           </thead>
           <tbody id="memberTbody"></tbody>
@@ -72,7 +87,6 @@
       </div>
     </div>
 
-    <p id="loadMsg" style="text-align:center;color:#999;margin-top:16px;">加载中...</p>
   </div>
 </div>
 

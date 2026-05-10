@@ -12,6 +12,14 @@ const PORT = parseInt(process.env.PORT) || 3000;
 app.use(cors());
 app.use(express.json());
 
+// 禁用前端文件缓存
+app.use('/css/', (req, res, next) => { res.set('Cache-Control', 'no-cache, no-store, must-revalidate'); next(); });
+app.use('/js/', (req, res, next) => { res.set('Cache-Control', 'no-cache, no-store, must-revalidate'); next(); });
+app.use('/index.html', (req, res, next) => { res.set('Cache-Control', 'no-cache, no-store, must-revalidate'); next(); });
+app.use('/dashboard.html', (req, res, next) => { res.set('Cache-Control', 'no-cache, no-store, must-revalidate'); next(); });
+app.use('/admin.html', (req, res, next) => { res.set('Cache-Control', 'no-cache, no-store, must-revalidate'); next(); });
+app.use('/submitted.html', (req, res, next) => { res.set('Cache-Control', 'no-cache, no-store, must-revalidate'); next(); });
+
 // 服务器启动时间
 const SERVER_START = Date.now();
 
@@ -81,7 +89,7 @@ function genToken() {
 }
 
 function auth(req, res, next) {
-  const token = req.headers['authorization'];
+  const token = req.headers['authorization'] || req.query.token;
   if (!token || !sessions[token]) {
     return res.status(401).json({ error: '请先登录' });
   }
@@ -90,7 +98,7 @@ function auth(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  const token = req.headers['authorization'];
+  const token = req.headers['authorization'] || req.query.token;
   if (!token || !sessions[token]) {
     return res.status(401).json({ error: '请先登录' });
   }

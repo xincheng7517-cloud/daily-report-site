@@ -14,13 +14,19 @@ document.getElementById('userInfo').textContent = '👤 ' + userName;
 document.getElementById('datePicker').value = new Date().toISOString().slice(0, 10);
 document.getElementById('pageTitle').textContent = '日报汇总 — ' + new Date().toISOString().slice(0, 10);
 
-// 管理员可见内容
-loadMembers();
-
 let currentMembers = [];
 let currentDate = '';
 
-window.onload = function() { loadSummary(); };
+window.onload = function() { loadSummary(); loadMembers(); };
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+  document.getElementById('tabContent' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+  if (tab === 'members') loadMembers();
+  if (tab === 'stats') loadSummary();
+}
 
 function api(path, opts = {}) {
   return fetch(path, {
@@ -85,110 +91,34 @@ function loadSummary() {
   });
 }
 
-// 删除日报（通过用户id和当前日期）
 function deleteReportByUser(userId) {
   if (!confirm('确定删除该成员的日报吗？')) return;
-  // 先找到该用户的日报id
   api('/api/reports/summary?date=' + currentDate).then(({ body }) => {
-    const members = body.members || [];
-    const member = members.find(m => m.id === userId);
-    if (!member || !member.submitted) {
-      alert('该成员今日未提交日报');
-      return;
-    }
-    // 通过 API 找 report id - 需要查找实际report id
-    fetchReportId(userId, function(reportId) {
-      if (!reportId) { alert('未找到日报记录'); return; }
-      api('/api/report/' + reportId, { method: 'DELETE' }).then(({ status, body }) => {
-        if (status !== 200) { alert(body.error || '删除失败'); return; }
-        alert('✅ 删除成功');
-        loadSummary();
+    const member = (body.members || []).find(m => m.id === userId);
+    if (!member || !member.submitted) { alert('该成员今日未提交日报'); return; }
+    // 获取日报列表找到 report id
+    fetch('/api/reports', { headers: { 'Authorization': token } })
+      .then(r => r.json())
+      .then(data => {
+        const reports = data.reports || [];
+        const report = reports.find(r => r.user_id === userId && String(r.date) === currentDate);
+        if (!report) { alert('未找到日报记录'); return; }
+        api('/api/report/' + report.id, { method: 'DELETE' }).then(({ status, body }) => {
+          if (status !== 200) { alert(body.error || '删除失败'); return; }
+          alert('✅ 删除成功');
+          loadSummary();
+        });
       });
-    });
   });
 }
 
-function fetchReportId(userId, callback) {
-  // 获取所有日报，找到该用户当前日期的日报id
-  api('/api/reports/summary?date=' + currentDate).then(({ body }) => {
-    // 从汇总中获取report id - 需要通过另一个接口
-    // 简单方式：直接用getReports获取
-    apiGetReportId(userId, currentDate, callback);
-  });
-}
-
-function apiGetReportId(userId, date, callback) {
-  // 调用获取日报列表接口
-  fetch('/api/reports/summary?date=' + date, {
-    headers: { 'Authorization': token }
-  })
-  .then(r => r.json())
-  .then(data => {
-    // 查找用户提交
-    const members = data.members || [];
-    const member = members.find(m => m.id === userId);
-    if (!member || !member.submitted_at) { callback(null); return; }
-    // 需要通过成员名称来查找report id
-    // 获取所有日报
-    fetch('/api/reports', {
-      headers: { 'Authorization': token }
-    })
-    .then(r => r.json())
-    .then(allData => {
-      const reports = allData.reports || [];
-      const report = reports.find(r => r.user_id === userId && r.date === date);
-      callback(report ? report.id : null);
-    });
-  });
-}
-
-// 导出 xlsx（服务端生成）
+// 导出 xlsx（服务端生成，直接下载）
 function exportXLSX() {
   const date = currentDate;
-  const url = '/api/export/xlsx?date=' + date;
-  // 用 token 做 auth
-  fetch(url, { headers: { 'Authorization': token } })
-    .then(r => {
-      if (r.status === 403) { alert('无权限'); return; }
-      if (r.status !== 200) { alert('导出失败'); return; }
-      return r.blob();
-    })
-    .then(blob => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = '日报汇总_' + date + '.xlsx';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    })
-    .catch(() => alert('导出失败'));
+  window.open('/api/export/xlsx?date=' + date + '&token=' + token, '_blank');
 }
 
-function exportCSV() {
-  if (currentMembers.length === 0) {
-    alert('暂无数据可导出');
-    return;
-  }
-  let csv = '\uFEFF序号,姓名,状态,工作里程,工作内容摘要,提交时间\n';
-  currentMembers.forEach((m, i) => {
-    const mileage = (m.mileage || '').replace(/"/g, '""');
-    const content = (m.content || '').replace(/"/g, '""');
-    const time = (m.submitted_at || '').replace(/"/g, '""');
-    csv += `${i + 1},"${m.name}","${m.status}","${mileage}","${content}","${time}"\n`;
-  });
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `日报汇总_${currentDate}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ======== 成员管理（仅管理员） ========
+// ======== 成员管理 ========
 function loadMembers() {
   api('/api/members').then(({ body }) => {
     const tbody = document.getElementById('memberTbody');
@@ -244,10 +174,6 @@ function changePassword(id) {
       if (status !== 200) { alert(body.error || '修改失败'); return; }
       alert('✅ 密码修改成功');
     });
-}
-
-function goDashboard() {
-  window.location.href = 'dashboard.html';
 }
 
 function doLogout() {

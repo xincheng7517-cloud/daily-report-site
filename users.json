@@ -134,8 +134,8 @@
   },
   {
     "id": 20,
-    "name": "管理员",
-    "password": "admin888",
+    "name": "xincheng",
+    "password": "admin",
     "active": 1,
     "isAdmin": true,
     "created_at": "2026-05-08T01:14:49.084Z"
