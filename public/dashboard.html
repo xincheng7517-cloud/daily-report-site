@@ -3,36 +3,35 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>提交明日计划 - 团队日报系统</title>
+  <title>提交日报 - 富加监理二标日报系统</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
 <nav class="navbar">
-  <h2>📋 团队日报系统</h2>
+  <h2>📋 富加监理二标日报系统</h2>
   <div>
     <span class="user-info" id="userInfo"></span>
-    <button class="btn btn-default btn-sm" onclick="goAdmin()">汇总查看</button>
     <button class="btn btn-danger btn-sm" onclick="doLogout()">退出</button>
   </div>
 </nav>
 
 <div class="container" style="align-items:flex-start;padding-top:24px;">
   <div class="card wide-card" style="max-width:560px;">
-    <h1>提交明日计划</h1>
+    <h1>提交今日工作日报</h1>
     <p class="subtitle" id="todayDate"></p>
 
     <div class="form-group">
-      <label>🌡 明日工作里程</label>
-      <textarea id="mileage" rows="2" placeholder="请填写明日计划工作里程（如：K26+100～K30+000段路基碾压）..."></textarea>
+      <label>🌡 今日工作里程</label>
+      <textarea id="mileage" rows="2" placeholder="请填写今日工作里程（如：K26+100～K30+000段路基碾压）..."></textarea>
     </div>
 
     <div class="form-group">
-      <label>📝 明日工作内容</label>
-      <textarea id="content" rows="5" placeholder="请填写明日主要工作内容..."></textarea>
+      <label>📝 今日工作内容</label>
+      <textarea id="content" rows="5" placeholder="请填写今日主要工作内容..."></textarea>
     </div>
 
-    <button class="btn btn-primary" id="submitBtn" onclick="doSubmit()">提交明日计划</button>
+    <button class="btn btn-primary" id="submitBtn" onclick="doSubmit()">提交日报</button>
     <button class="btn btn-warning" id="updateBtn" onclick="doUpdate()" style="display:none;">保存修改</button>
     <p id="msg" class="success"></p>
     <p id="err" class="error"></p>

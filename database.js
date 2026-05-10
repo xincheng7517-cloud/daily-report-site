@@ -363,6 +363,19 @@ async function toggleUser(id) {
   );
 }
 
+async function updatePassword(id, newPassword) {
+  if (useFallback) {
+    const u = fallbackUsers.find(x => x.id === id);
+    if (u) {
+      u.password = newPassword;
+      try { fs.writeFileSync(USERS_FILE, JSON.stringify(fallbackUsers, null, 2)); } catch(e) {}
+    }
+    return;
+  }
+  const p = await getPool();
+  return p.query('UPDATE users SET password = $1 WHERE id = $2', [newPassword, id]);
+}
+
 // ========== 日报查询 ==========
 
 async function getReports() {
@@ -418,7 +431,20 @@ async function updateReport(userId, date, mileage, content, submittedAt) {
   );
 }
 
+async function deleteReport(id) {
+  if (useFallback) {
+    const idx = fallbackReports.findIndex(r => r.id === id);
+    if (idx !== -1) {
+      fallbackReports.splice(idx, 1);
+      try { fs.writeFileSync(REPORTS_FILE, JSON.stringify(fallbackReports, null, 2)); } catch(e) {}
+    }
+    return;
+  }
+  const p = await getPool();
+  return p.query('DELETE FROM reports WHERE id = $1', [id]);
+}
+
 module.exports = {
-  findUser, getUsers, getActiveUsers, addUser, toggleUser,
-  getReports, getReport, addReport, updateReport,
+  findUser, getUsers, getActiveUsers, addUser, toggleUser, updatePassword,
+  getReports, getReport, addReport, updateReport, deleteReport,
 };

@@ -3,13 +3,25 @@ const cors = require('cors');
 const path = require('path');
 const dns = require('dns');
 const net = require('net');
-const { findUser, getUsers, getActiveUsers, getReports, getReport, addReport, updateReport, addUser, toggleUser } = require('./database');
+const XLSX = require('xlsx');
+const { findUser, getUsers, getActiveUsers, getReports, getReport, addReport, updateReport, addUser, toggleUser, updatePassword, deleteReport } = require('./database');
 
 const app = express();
 const PORT = parseInt(process.env.PORT) || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+// 服务器启动时间
+const SERVER_START = Date.now();
+
+function getUptime() {
+  const diff = Date.now() - SERVER_START;
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+  return `${h}小时${m}分${s}秒`;
+}
 
 // ===== 网络诊断接口（Railway 排障用）=====
 app.get('/api/debug/net', async (req, res) => {
@@ -223,6 +235,12 @@ app.get('/api/members', async (req, res) => {
   res.json({ members: result.rows });
 });
 
+// 获取所有日报（管理员用）
+app.get('/api/reports', requireAdmin, async (req, res) => {
+  const result = await getReports();
+  res.json({ reports: result.rows });
+});
+
 // 添加新成员（仅管理员）
 app.post('/api/members', requireAdmin, async (req, res) => {
   const { name, password } = req.body;
@@ -239,6 +257,21 @@ app.put('/api/members/:id/toggle', requireAdmin, async (req, res) => {
   const result = await toggleUser(id);
   if (result.rows.length === 0) return res.status(404).json({ error: '成员不存在' });
   res.json({ success: true, active: result.rows[0].active });
+});
+
+// 修改成员密码（仅管理员）
+app.put('/api/members/:id', requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { password } = req.body;
+  if (!password || !password.trim()) {
+    return res.status(400).json({ error: '密码不能为空' });
+  }
+  try {
+    await updatePassword(id, password.trim());
+    res.json({ success: true, message: '密码修改成功' });
+  } catch (e) {
+    res.status(500).json({ error: '修改失败: ' + e.message });
+  }
 });
 
 // 免登录汇总查询（供自动化任务调用，需要 serviceKey）
@@ -281,6 +314,74 @@ app.post('/api/logout', (req, res) => {
   const token = req.headers['authorization'];
   if (token) delete sessions[token];
   res.json({ success: true });
+});
+
+// 删除日报（仅管理员）
+app.delete('/api/report/:id', requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    await deleteReport(id);
+    res.json({ success: true, message: '删除成功' });
+  } catch (e) {
+    res.status(500).json({ error: '删除失败: ' + e.message });
+  }
+});
+
+// 获取日报详情（按id）
+app.get('/api/report/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const result = await getReports();
+  const report = result.rows.find(r => r.id === id);
+  if (!report) return res.status(404).json({ error: '日报不存在' });
+  res.json({ report });
+});
+
+// 服务器运行时间
+app.get('/api/uptime', (req, res) => {
+  res.json({ uptime: getUptime() });
+});
+
+// 导出 xlsx（仅管理员）
+app.get('/api/export/xlsx', requireAdmin, async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const currentHour = now.getHours();
+    const afterDeadline = (date === todayStr && currentHour >= 18) || (date < todayStr);
+
+    const usersResult = await getActiveUsers();
+    const reportsResult = await getReports();
+    const users = usersResult.rows.filter(u => !u.isAdmin);
+    const reports = reportsResult.rows.filter(r => r.date === date);
+    const reportMap = {};
+    reports.forEach(r => { reportMap[r.user_id] = r; });
+
+    const data = users.map((m, i) => {
+      const r = reportMap[m.id];
+      let status = (!r && afterDeadline) ? '未完成' : (r ? '已完成' : '待提交');
+      return {
+        '序号': i + 1,
+        '姓名': m.name,
+        '状态': status,
+        '工作里程': r ? r.mileage : '',
+        '工作内容': r ? r.content : '',
+        '提交时间': r ? r.submitted_at : ''
+      };
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, '日报汇总');
+    ws['!cols'] = [{wch:6},{wch:10},{wch:8},{wch:40},{wch:50},{wch:20}];
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', `attachment; filename="日报汇总_${date}.xlsx"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buf);
+  } catch (e) {
+    res.status(500).json({ error: '导出失败: ' + e.message });
+  }
 });
 
 // 启动

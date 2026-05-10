@@ -5,13 +5,8 @@ if (!token) window.location.href = 'index.html';
 
 document.getElementById('userInfo').textContent = '👤 ' + userName;
 
-// 明日日期
-function getTomorrow() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-document.getElementById('todayDate').textContent = '计划日期：' + getTomorrow();
+// 今日日期
+document.getElementById('todayDate').textContent = '日报日期：' + new Date().toISOString().slice(0, 10);
 
 // 页面加载时检查今日是否已提交
 window.onload = function() {
@@ -31,12 +26,8 @@ function api(path, opts = {}) {
 function checkToday() {
   api('/api/report/today').then(({ body }) => {
     if (body.submitted) {
-      document.getElementById('submitBtn').style.display = 'none';
-      document.getElementById('updateBtn').style.display = '';
-      document.getElementById('mileage').value = body.report.mileage || '';
-      document.getElementById('content').value = body.report.content || '';
-      document.getElementById('alreadyBox').style.display = 'block';
-      document.getElementById('submittedTime').textContent = '提交时间：' + body.report.submitted_at;
+      // 已提交 -> 跳转到已提交页面
+      window.location.href = 'submitted.html';
     }
   });
 }
@@ -48,14 +39,15 @@ function doSubmit() {
   const err = document.getElementById('err');
   msg.textContent = ''; err.textContent = '';
 
-  if (!mileage.trim()) { err.textContent = '请填写明日工作里程'; return; }
-  if (!content.trim()) { err.textContent = '请填写明日工作内容'; return; }
+  if (!mileage.trim()) { err.textContent = '请填写今日工作里程'; return; }
+  if (!content.trim()) { err.textContent = '请填写今日工作内容'; return; }
 
   api('/api/report', { method: 'POST', body: JSON.stringify({ mileage, content }) })
     .then(({ status, body }) => {
       if (status !== 200) { err.textContent = body.error || '提交失败'; return; }
       msg.textContent = '✅ 提交成功！';
-      setTimeout(() => location.reload(), 800);
+      // 跳转到已提交页面
+      setTimeout(() => { window.location.href = 'submitted.html'; }, 500);
     });
 }
 
@@ -66,19 +58,16 @@ function doUpdate() {
   const err = document.getElementById('err');
   msg.textContent = ''; err.textContent = '';
 
-  if (!mileage.trim()) { err.textContent = '请填写明日工作里程'; return; }
-  if (!content.trim()) { err.textContent = '请填写明日工作内容'; return; }
+  if (!mileage.trim()) { err.textContent = '请填写今日工作里程'; return; }
+  if (!content.trim()) { err.textContent = '请填写今日工作内容'; return; }
 
   api('/api/report', { method: 'PUT', body: JSON.stringify({ mileage, content }) })
     .then(({ status, body }) => {
       if (status !== 200) { err.textContent = body.error || '修改失败'; return; }
       msg.textContent = '✅ 修改成功！';
-      setTimeout(() => location.reload(), 800);
+      // 跳转到已提交页面
+      setTimeout(() => { window.location.href = 'submitted.html'; }, 500);
     });
-}
-
-function goAdmin() {
-  window.location.href = 'admin.html';
 }
 
 function doLogout() {

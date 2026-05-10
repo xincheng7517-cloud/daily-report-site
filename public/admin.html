@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>明日计划汇总 - 团队日报系统</title>
+  <title>管理后台 - 富加监理二标日报系统</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
 <nav class="navbar">
-  <h2>📊 明日计划汇总</h2>
+  <h2>📊 富加监理二标日报系统 · 管理后台</h2>
   <div>
-    <button class="btn btn-default btn-sm" onclick="goDashboard()">返回提交</button>
+    <span class="user-info" id="userInfo"></span>
+    <button class="btn btn-default btn-sm" onclick="goDashboard()">返回</button>
     <button class="btn btn-danger btn-sm" onclick="doLogout()">退出</button>
   </div>
 </nav>
@@ -19,11 +20,13 @@
 <div class="container" style="align-items:flex-start;padding-top:20px;">
   <div class="card wide-card">
 
+    <!-- 顶部操作栏 -->
     <div class="top-bar">
-      <h2 id="pageTitle">明日计划汇总</h2>
-      <div style="display:flex;gap:8px;align-items:center;">
+      <h2 id="pageTitle">日报汇总</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <input type="date" class="date-picker" id="datePicker" onchange="loadSummary()" />
-        <button class="btn btn-success btn-sm" id="exportBtn" onclick="exportCSV()" style="display:none;">导出Excel</button>
+        <button class="btn btn-success btn-sm" onclick="exportXLSX()">📥 导出xlsx</button>
+        <button class="btn btn-default btn-sm" onclick="exportCSV()">导出CSV</button>
       </div>
     </div>
 
@@ -35,18 +38,19 @@
           <tr>
             <th style="width:50px;">#</th>
             <th>姓名</th>
-            <th style="width:90px;">状态</th>
+            <th style="width:80px;">状态</th>
             <th>工作里程</th>
             <th>工作内容摘要</th>
-            <th style="width:160px;">提交时间</th>
+            <th style="width:150px;">提交时间</th>
+            <th style="width:70px;">操作</th>
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
       </table>
     </div>
 
-    <!-- 成员管理区（仅管理员可见） -->
-    <div id="adminPanel" style="display:none;margin-top:28px;padding-top:20px;border-top:2px solid #e8e8e8;">
+    <!-- 成员管理区 -->
+    <div id="adminPanel" style="margin-top:28px;padding-top:20px;border-top:2px solid #e8e8e8;">
       <h3 style="margin-bottom:12px;">👤 成员管理</h3>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
         <input type="text" id="newName" placeholder="新成员姓名" style="flex:1;min-width:120px;" />
@@ -59,8 +63,8 @@
           <thead>
             <tr>
               <th>姓名</th>
-              <th style="width:80px;">状态</th>
-              <th style="width:100px;">操作</th>
+              <th style="width:70px;">状态</th>
+              <th style="width:160px;">操作</th>
             </tr>
           </thead>
           <tbody id="memberTbody"></tbody>

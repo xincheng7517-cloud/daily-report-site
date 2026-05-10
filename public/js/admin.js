@@ -3,17 +3,19 @@ const userName = localStorage.getItem('userName');
 const isAdmin = localStorage.getItem('isAdmin') === '1';
 
 if (!token) window.location.href = 'index.html';
+if (!isAdmin) {
+  alert('无权限访问管理后台');
+  window.location.href = 'dashboard.html';
+}
+
+document.getElementById('userInfo').textContent = '👤 ' + userName;
 
 // 默认日期为今天
 document.getElementById('datePicker').value = new Date().toISOString().slice(0, 10);
 document.getElementById('pageTitle').textContent = '日报汇总 — ' + new Date().toISOString().slice(0, 10);
 
 // 管理员可见内容
-if (isAdmin) {
-  document.getElementById('exportBtn').style.display = '';
-  document.getElementById('adminPanel').style.display = '';
-  loadMembers();
-}
+loadMembers();
 
 let currentMembers = [];
 let currentDate = '';
@@ -33,7 +35,7 @@ function api(path, opts = {}) {
 function loadSummary() {
   const date = document.getElementById('datePicker').value;
   currentDate = date;
-  document.getElementById('pageTitle').textContent = '明日计划汇总 — ' + date;
+  document.getElementById('pageTitle').textContent = '日报汇总 — ' + date;
   document.getElementById('loadMsg').style.display = 'block';
   document.getElementById('tbody').innerHTML = '';
   document.getElementById('stats').innerHTML = '';
@@ -58,7 +60,7 @@ function loadSummary() {
 
     const tbody = document.getElementById('tbody');
     if (members.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">暂无成员数据</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;padding:20px;">暂无成员数据</td></tr>';
       return;
     }
     members.forEach((m, i) => {
@@ -66,6 +68,7 @@ function loadSummary() {
       if (m.status === '已完成') statusClass = 'status-done';
       if (m.status === '未完成') statusClass = 'status-undone';
       const tr = document.createElement('tr');
+      const hasReport = m.submitted;
       tr.innerHTML = `
         <td>${i + 1}</td>
         <td><b>${m.name}</b></td>
@@ -73,6 +76,7 @@ function loadSummary() {
         <td>${m.mileage || '—'}</td>
         <td>${m.content || '—'}</td>
         <td style="font-size:12px;color:#888;">${m.submitted_at || '—'}</td>
+        <td>${hasReport ? '<button class="btn-del" onclick="deleteReportByUser(' + m.id + ')">删除</button>' : ''}</td>
       `;
       tbody.appendChild(tr);
     });
@@ -81,22 +85,105 @@ function loadSummary() {
   });
 }
 
+// 删除日报（通过用户id和当前日期）
+function deleteReportByUser(userId) {
+  if (!confirm('确定删除该成员的日报吗？')) return;
+  // 先找到该用户的日报id
+  api('/api/reports/summary?date=' + currentDate).then(({ body }) => {
+    const members = body.members || [];
+    const member = members.find(m => m.id === userId);
+    if (!member || !member.submitted) {
+      alert('该成员今日未提交日报');
+      return;
+    }
+    // 通过 API 找 report id - 需要查找实际report id
+    fetchReportId(userId, function(reportId) {
+      if (!reportId) { alert('未找到日报记录'); return; }
+      api('/api/report/' + reportId, { method: 'DELETE' }).then(({ status, body }) => {
+        if (status !== 200) { alert(body.error || '删除失败'); return; }
+        alert('✅ 删除成功');
+        loadSummary();
+      });
+    });
+  });
+}
+
+function fetchReportId(userId, callback) {
+  // 获取所有日报，找到该用户当前日期的日报id
+  api('/api/reports/summary?date=' + currentDate).then(({ body }) => {
+    // 从汇总中获取report id - 需要通过另一个接口
+    // 简单方式：直接用getReports获取
+    apiGetReportId(userId, currentDate, callback);
+  });
+}
+
+function apiGetReportId(userId, date, callback) {
+  // 调用获取日报列表接口
+  fetch('/api/reports/summary?date=' + date, {
+    headers: { 'Authorization': token }
+  })
+  .then(r => r.json())
+  .then(data => {
+    // 查找用户提交
+    const members = data.members || [];
+    const member = members.find(m => m.id === userId);
+    if (!member || !member.submitted_at) { callback(null); return; }
+    // 需要通过成员名称来查找report id
+    // 获取所有日报
+    fetch('/api/reports', {
+      headers: { 'Authorization': token }
+    })
+    .then(r => r.json())
+    .then(allData => {
+      const reports = allData.reports || [];
+      const report = reports.find(r => r.user_id === userId && r.date === date);
+      callback(report ? report.id : null);
+    });
+  });
+}
+
+// 导出 xlsx（服务端生成）
+function exportXLSX() {
+  const date = currentDate;
+  const url = '/api/export/xlsx?date=' + date;
+  // 用 token 做 auth
+  fetch(url, { headers: { 'Authorization': token } })
+    .then(r => {
+      if (r.status === 403) { alert('无权限'); return; }
+      if (r.status !== 200) { alert('导出失败'); return; }
+      return r.blob();
+    })
+    .then(blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '日报汇总_' + date + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    })
+    .catch(() => alert('导出失败'));
+}
+
 function exportCSV() {
   if (currentMembers.length === 0) {
     alert('暂无数据可导出');
     return;
   }
-  let csv = '\uFEFF序号,姓名,工作里程,工作内容摘要\n';
+  let csv = '\uFEFF序号,姓名,状态,工作里程,工作内容摘要,提交时间\n';
   currentMembers.forEach((m, i) => {
     const mileage = (m.mileage || '').replace(/"/g, '""');
     const content = (m.content || '').replace(/"/g, '""');
-    csv += `${i + 1},"${m.name}","${mileage}","${content}"\n`;
+    const time = (m.submitted_at || '').replace(/"/g, '""');
+    csv += `${i + 1},"${m.name}","${m.status}","${mileage}","${content}","${time}"\n`;
   });
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `明日计划_${currentDate}.csv`;
+  a.download = `日报汇总_${currentDate}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -112,8 +199,11 @@ function loadMembers() {
         <td><b>${m.name}</b></td>
         <td style="color:${m.active ? '#52c41a' : '#ff4d4f'};">${m.active ? '启用' : '禁用'}</td>
         <td>
-          <button onclick="toggleMember(${m.id})" style="padding:2px 8px;border-radius:4px;border:1px solid #d9d9d9;background:#fff;cursor:pointer;font-size:12px;">
+          <button onclick="toggleMember(${m.id})" style="padding:2px 8px;border-radius:4px;border:1px solid #d9d9d9;background:#fff;cursor:pointer;font-size:12px;margin-right:4px;">
             ${m.active ? '禁用' : '启用'}
+          </button>
+          <button onclick="changePassword(${m.id})" style="padding:2px 8px;border-radius:4px;border:1px solid #d9d9d9;background:#fff;cursor:pointer;font-size:12px;">
+            改密
           </button>
         </td>
       `;
@@ -133,7 +223,7 @@ function addMember() {
   api('/api/members', { method: 'POST', body: JSON.stringify({ name, password }) })
     .then(({ status, body }) => {
       if (status !== 200) { msg.textContent = body.error || '添加失败'; msg.style.color = '#ff4d4f'; return; }
-      msg.textContent = '添加成功！';
+      msg.textContent = '✅ 添加成功！';
       msg.style.color = '#52c41a';
       document.getElementById('newName').value = '';
       loadMembers();
@@ -144,6 +234,16 @@ function addMember() {
 function toggleMember(id) {
   api(`/api/members/${id}/toggle`, { method: 'PUT' })
     .then(() => loadMembers());
+}
+
+function changePassword(id) {
+  const newPwd = prompt('请输入新密码：');
+  if (!newPwd || newPwd.trim() === '') return;
+  api('/api/members/' + id, { method: 'PUT', body: JSON.stringify({ password: newPwd.trim() }) })
+    .then(({ status, body }) => {
+      if (status !== 200) { alert(body.error || '修改失败'); return; }
+      alert('✅ 密码修改成功');
+    });
 }
 
 function goDashboard() {

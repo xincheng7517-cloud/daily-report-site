@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日报已提交 - 富加监理二标日报系统</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .submitted-card { text-align:center; }
+    .submitted-card .check-icon { font-size:64px; margin-bottom:8px; }
+    .submitted-card h1 { margin-bottom:4px; }
+    .submitted-card .subtitle { margin-bottom:24px; }
+    .report-preview { background:#f9f9f9; border-radius:8px; padding:16px; text-align:left; margin-bottom:20px; }
+    .report-preview .field { margin-bottom:10px; }
+    .report-preview .field .label { font-size:12px; color:#888; font-weight:600; }
+    .report-preview .field .value { font-size:14px; color:#333; margin-top:2px; white-space:pre-wrap; }
+    .action-buttons { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+    .action-buttons .btn { width:auto; padding:8px 24px; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar">
+  <h2>📋 富加监理二标日报系统</h2>
+  <div>
+    <span class="user-info" id="userInfo"></span>
+    <button class="btn btn-danger btn-sm" onclick="doLogout()">退出</button>
+  </div>
+</nav>
+
+<div class="container" style="align-items:flex-start;padding-top:24px;">
+  <div class="card wide-card submitted-card" style="max-width:520px;">
+    <div class="check-icon">✅</div>
+    <h1>日报已提交</h1>
+    <p class="subtitle" id="submittedDate"></p>
+
+    <div class="report-preview" id="reportPreview">
+      <div class="field">
+        <div class="label">🌡 工作里程</div>
+        <div class="value" id="previewMileage"></div>
+      </div>
+      <div class="field">
+        <div class="label">📝 工作内容</div>
+        <div class="value" id="previewContent"></div>
+      </div>
+      <div class="field">
+        <div class="label">⏰ 提交时间</div>
+        <div class="value" id="previewTime"></div>
+      </div>
+    </div>
+
+    <div class="action-buttons">
+      <button class="btn btn-warning" onclick="goModify()" style="width:auto;padding:8px 24px;">✏️ 修改</button>
+      <button class="btn btn-default" onclick="goReturn()" style="width:auto;padding:8px 24px;color:#333;">返回</button>
+      <button class="btn btn-danger" onclick="doLogout()" style="width:auto;padding:8px 24px;">退出</button>
+    </div>
+
+    <p id="err" class="error" style="margin-top:12px;"></p>
+  </div>
+</div>
+
+<script src="js/submitted.js"></script>
+</body>
+</html>
