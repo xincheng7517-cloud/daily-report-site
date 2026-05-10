@@ -249,30 +249,27 @@ async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
       `);
 
       for (const u of existingUsers) {
-        const exist = await client.query('SELECT id FROM users WHERE id = $1', [u.id]);
-        if (exist.rows.length === 0) {
-          const ts = u.created_at ? new Date(u.created_at).getTime() / 1000 : null;
+        const ts = u.created_at ? new Date(u.created_at).getTime() / 1000 : null;
+        try {
           await client.query(
             `INSERT INTO users (id, name, password, active, is_admin, created_at)
-             VALUES ($1,$2,$3,$4,$5,${ts ? 'to_timestamp($6)' : 'NOW()'})`,
+             VALUES ($1,$2,$3,$4,$5,${ts ? 'to_timestamp($6)' : 'NOW()'})
+             ON CONFLICT (id) DO NOTHING`,
             ts ? [u.id, u.name, u.password, u.active || 1, !!u.isAdmin, ts]
                 : [u.id, u.name, u.password, u.active || 1, !!u.isAdmin]
           );
-        }
+        } catch(e) { /* 跳过冲突 */ }
       }
 
       for (const r of existingReports) {
-        const exist = await client.query(
-          'SELECT id FROM reports WHERE user_id = $1 AND date = $2',
-          [r.user_id, r.date]
-        );
-        if (exist.rows.length === 0) {
+        try {
           await client.query(
             `INSERT INTO reports (id, user_id, date, mileage, content, submitted_at)
-             VALUES ($1,$2,$3,$4,$5,$6)`,
+             VALUES ($1,$2,$3,$4,$5,$6)
+             ON CONFLICT (id) DO NOTHING`,
             [r.id, r.user_id, r.date, r.mileage, r.content, r.submitted_at]
           );
-        }
+        } catch(e) { /* 跳过冲突 */ }
       }
 
       console.log(`✅ 数据库初始化完成（第${i}次尝试）`);
