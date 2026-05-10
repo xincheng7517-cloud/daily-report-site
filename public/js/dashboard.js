@@ -8,6 +8,9 @@ document.getElementById('userInfo').textContent = '👤 ' + userName;
 // 今日日期
 document.getElementById('todayDate').textContent = '日报日期：' + new Date().toISOString().slice(0, 10);
 
+// 是否为修改模式（从已提交页点"修改"过来）
+const isModifyMode = window.location.search.includes('modify=1');
+
 // 页面加载时检查今日是否已提交
 window.onload = function() {
   checkToday();
@@ -26,8 +29,18 @@ function api(path, opts = {}) {
 function checkToday() {
   api('/api/report/today').then(({ body }) => {
     if (body.submitted) {
-      // 已提交 -> 跳转到已提交页面
-      window.location.href = 'submitted.html';
+      if (isModifyMode) {
+        // 修改模式：加载已有数据，显示修改按钮
+        document.getElementById('submitBtn').style.display = 'none';
+        document.getElementById('updateBtn').style.display = '';
+        document.getElementById('mileage').value = body.report.mileage || '';
+        document.getElementById('content').value = body.report.content || '';
+        document.getElementById('alreadyBox').style.display = 'block';
+        document.getElementById('submittedTime').textContent = '上次提交时间：' + body.report.submitted_at;
+      } else {
+        // 普通模式：已提交 -> 跳转到已提交页面
+        window.location.href = 'submitted.html';
+      }
     }
   });
 }
@@ -46,7 +59,6 @@ function doSubmit() {
     .then(({ status, body }) => {
       if (status !== 200) { err.textContent = body.error || '提交失败'; return; }
       msg.textContent = '✅ 提交成功！';
-      // 跳转到已提交页面
       setTimeout(() => { window.location.href = 'submitted.html'; }, 500);
     });
 }
@@ -65,7 +77,6 @@ function doUpdate() {
     .then(({ status, body }) => {
       if (status !== 200) { err.textContent = body.error || '修改失败'; return; }
       msg.textContent = '✅ 修改成功！';
-      // 跳转到已提交页面
       setTimeout(() => { window.location.href = 'submitted.html'; }, 500);
     });
 }

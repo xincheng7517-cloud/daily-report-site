@@ -36,11 +36,11 @@ function loadTodayReport() {
 }
 
 function goModify() {
-  window.location.href = 'dashboard.html';
+  window.location.href = 'dashboard.html?modify=1';
 }
 
 function goReturn() {
-  window.location.href = 'dashboard.html';
+  location.reload();
 }
 
 function doLogout() {
