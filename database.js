@@ -3,6 +3,10 @@ const dns = require('dns');
 const { promisify } = require('util');
 const net = require('net');
 const fs = require('fs');
+const path = require('path');
+
+const USERS_FILE = path.join(__dirname, 'users.json');
+const REPORTS_FILE = path.join(__dirname, 'reports.json');
 
 const lookup = promisify(dns.lookup);
 
@@ -62,8 +66,22 @@ let fallbackReports = [];
 
 // 加载 JSON 备份文件
 function loadFallbackFiles() {
-  try { fallbackUsers = JSON.parse(fs.readFileSync('./users.json', 'utf8')); } catch (e) { fallbackUsers = []; }
-  try { fallbackReports = JSON.parse(fs.readFileSync('./reports.json', 'utf8')); } catch (e) { fallbackReports = []; }
+  console.log(`[DB][Fallback] 加载文件: ${USERS_FILE}`);
+  try {
+    fallbackUsers = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+    console.log(`[DB][Fallback] users.json 加载成功: ${fallbackUsers.length} 个用户`);
+  } catch (e) {
+    console.error(`[DB][Fallback] users.json 加载失败: ${e.message}`);
+    fallbackUsers = [];
+  }
+  console.log(`[DB][Fallback] 加载文件: ${REPORTS_FILE}`);
+  try {
+    fallbackReports = JSON.parse(fs.readFileSync(REPORTS_FILE, 'utf8'));
+    console.log(`[DB][Fallback] reports.json 加载成功: ${fallbackReports.length} 条日报`);
+  } catch (e) {
+    console.error(`[DB][Fallback] reports.json 加载失败: ${e.message}`);
+    fallbackReports = [];
+  }
 }
 
 async function initPool() {
@@ -125,8 +143,8 @@ async function initPool() {
       user: p.user,
       password: p.password,
       database: p.database,
-      // Railway 内部 SSL：prefer 表示优先 SSL，不行就退到明文
-      ssl: 'prefer',
+      // Railway 内部网络：同私有网络无需 SSL
+      ssl: false,
       connectionTimeoutMillis: 20000,
     });
   }
@@ -147,7 +165,8 @@ async function initPool() {
       user: pgUser,
       password: pgPassword,
       database: pgDatabase,
-      ssl: 'prefer',
+      // 纯参数方式连接：无需 SSL
+      ssl: false,
       connectionTimeoutMillis: 20000,
     });
   }
@@ -203,9 +222,9 @@ async function initDBWithRetry(maxRetries = 10, intervalMs = 3000) {
       client = await p.connect();
 
       let existingUsers = [];
-      try { existingUsers = JSON.parse(fs.readFileSync('./users.json', 'utf8')); } catch (e) {}
+      try { existingUsers = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); } catch (e) {}
       let existingReports = [];
-      try { existingReports = JSON.parse(fs.readFileSync('./reports.json', 'utf8')); } catch (e) {}
+      try { existingReports = JSON.parse(fs.readFileSync(REPORTS_FILE, 'utf8')); } catch (e) {}
 
       await client.query(`
         CREATE TABLE IF NOT EXISTS users (
@@ -317,7 +336,7 @@ async function addUser(name, password) {
     const maxId = fallbackUsers.length > 0 ? Math.max(...fallbackUsers.map(u => u.id)) : 0;
     const newUser = { id: maxId + 1, name, password, active: 1, isAdmin: false };
     fallbackUsers.push(newUser);
-    try { fs.writeFileSync('./users.json', JSON.stringify(fallbackUsers, null, 2)); } catch(e) {}
+    try { fs.writeFileSync(USERS_FILE, JSON.stringify(fallbackUsers, null, 2)); } catch(e) {}
     return { rows: [{ id: newUser.id }] };
   }
   const p = await getPool();
@@ -332,7 +351,7 @@ async function toggleUser(id) {
     const u = fallbackUsers.find(x => x.id === id);
     if (u) {
       u.active = u.active ? 0 : 1;
-      try { fs.writeFileSync('./users.json', JSON.stringify(fallbackUsers, null, 2)); } catch(e) {}
+      try { fs.writeFileSync(USERS_FILE, JSON.stringify(fallbackUsers, null, 2)); } catch(e) {}
       return { rows: [{ active: u.active }] };
     }
     return { rows: [] };
@@ -369,7 +388,7 @@ async function addReport(report) {
     const maxId = fallbackReports.length > 0 ? Math.max(...fallbackReports.map(r => r.id)) : 0;
     const newReport = { ...report, id: maxId + 1 };
     fallbackReports.push(newReport);
-    try { fs.writeFileSync('./reports.json', JSON.stringify(fallbackReports, null, 2)); } catch(e) {}
+    try { fs.writeFileSync(REPORTS_FILE, JSON.stringify(fallbackReports, null, 2)); } catch(e) {}
     return { rows: [{ id: newReport.id }] };
   }
   const p = await getPool();
@@ -387,7 +406,7 @@ async function updateReport(userId, date, mileage, content, submittedAt) {
       r.mileage = mileage;
       r.content = content;
       r.submitted_at = submittedAt;
-      try { fs.writeFileSync('./reports.json', JSON.stringify(fallbackReports, null, 2)); } catch(e) {}
+      try { fs.writeFileSync(REPORTS_FILE, JSON.stringify(fallbackReports, null, 2)); } catch(e) {}
     }
     return;
   }
