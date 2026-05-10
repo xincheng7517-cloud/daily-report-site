@@ -216,7 +216,11 @@ app.get('/api/reports/summary', auth, async (req, res) => {
   const reportsResult = await getReports();
 
   const users = usersResult.rows.filter(u => !u.isAdmin);
-  const reports = reportsResult.rows.filter(r => r.date === date);
+  const reports = reportsResult.rows.filter(r => {
+    // pg 库可能把 DATE 返回为 Date 对象，统一转字符串比较
+    const reportDate = typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().slice(0, 10);
+    return reportDate === date;
+  });
 
   const reportMap = {};
   reports.forEach(r => { reportMap[r.user_id] = r; });
@@ -299,7 +303,10 @@ app.get('/api/public/summary', async (req, res) => {
   const reportsResult = await getReports();
 
   const users = usersResult.rows.filter(u => !u.isAdmin);
-  const reports = reportsResult.rows.filter(r => r.date === date);
+  const reports = reportsResult.rows.filter(r => {
+    const reportDate = typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().slice(0, 10);
+    return reportDate === date;
+  });
   const reportMap = {};
   reports.forEach(r => { reportMap[r.user_id] = r; });
 
@@ -361,7 +368,10 @@ app.get('/api/export/xlsx', requireAdmin, async (req, res) => {
     const usersResult = await getActiveUsers();
     const reportsResult = await getReports();
     const users = usersResult.rows.filter(u => !u.isAdmin);
-    const reports = reportsResult.rows.filter(r => r.date === date);
+    const reports = reportsResult.rows.filter(r => {
+      const reportDate = typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().slice(0, 10);
+      return reportDate === date;
+    });
     const reportMap = {};
     reports.forEach(r => { reportMap[r.user_id] = r; });
 
